@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Elizabeth Street Catchment Map</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Elizabeth Street Catchment — Melbourne</h1>
+    <form id="address-search">
+      <input id="address-search-input" type="text" placeholder="Search an address…" autocomplete="off" />
+      <button type="submit">Search</button>
+    </form>
+  </header>
+  <div id="address-search-message"></div>
+
+  <div id="map"></div>
+
+  <aside id="story-panel">
+    <button id="story-panel-close" aria-label="Close">&times;</button>
+    <img id="story-panel-image" alt="" />
+    <div id="story-panel-video-wrapper">
+      <iframe id="story-panel-video" title="Embedded video" allowfullscreen></iframe>
+    </div>
+    <h2 id="story-panel-title"></h2>
+    <p id="story-panel-description"></p>
+    <p id="story-panel-credit"></p>
+    <div id="story-panel-links"></div>
+  </aside>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="js/map.js"></script>
+</body>
+</html>

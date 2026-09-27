@@ -1,0 +1,28 @@
+[
+  {
+    "id": "1972-elizabeth-street",
+    "title": "1972 — Elizabeth Street Transformed",
+    "year": 1972,
+    "lat": -37.8136,
+    "lng": 144.9633,
+    "image": "https://hdp-au-prod-app-mw-yoursay-files.s3.ap-southeast-2.amazonaws.com/1817/6154/1835/The_1972_Melbourne_flood_that_turned_streets_into_rivers_and_stopped_a_city.jpg",
+    "credit": "Image: Melbourne Water",
+    "description": "On 17 February 1972, 76mm of rain fell on central Melbourne in a single hour, turning Elizabeth Street — built over the long-buried Williams Creek — into a torrent up to 1.5m deep. The flood stranded commuters, damaged cars, and caused hundreds of thousands of dollars in damage.",
+    "links": [
+      { "label": "Read full story (Melbourne Water)", "url": "https://letstalk.melbournewater.com.au/flood-information/community-stories/1972-elizabeth-street-transformed" }
+    ]
+  },
+  {
+    "id": "1972-7news-flashback",
+    "title": "7NEWS Flashback: 1972 Flooding",
+    "year": 1972,
+    "date": "1972",
+    "lat": -37.8138,
+    "lng": 144.9631,
+    "video": { "provider": "facebook", "url": "https://www.facebook.com/7NEWSMelbourne/videos/7-news-flashback-1972-flooding/1049147031814133/" },
+    "description": "Historic footage of the 1972 Elizabeth Street flood, reported by 7NEWS Melbourne.",
+    "links": [
+      { "label": "Watch on Facebook", "url": "https://www.facebook.com/7NEWSMelbourne/videos/7-news-flashback-1972-flooding/1049147031814133/" }
+    ]
+  }
+]
