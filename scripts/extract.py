@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-Extract the Elizabeth Street catchment boundary and the LSIO/SBO planning
-overlay features that intersect it, saving each as GeoJSON into data/.
+Download the raw data for the Elizabeth Street catchment flood map into
+data/raw/. Nothing here is map-ready; run scripts/transform.py afterwards
+to build the layers the map loads.
 
 Sources:
   - Catchment boundaries: Melbourne Water open data
     (https://data-melbournewater.opendata.arcgis.com), "Catchments -
-    Waterways and Drains Subcatchments" dataset. Filtered to the
-    "ELIZABETH ST DRAIN (CITY)" sub-catchment (the Melbourne CBD one —
-    the dataset also contains an unrelated "ELIZABETH ST M.D. (COBURG)"
-    sub-catchment in a different suburb).
+    Waterways and Drains Subcatchments" dataset, saved whole.
   - LSIO / SBO: Vicplan planning scheme overlays
     (https://plan-gis.mapshare.vic.gov.au/.../Vicplan_PlanningSchemeOverlays),
-    queried directly for only the features that intersect the catchment
-    polygon (server-side spatial filter, not a client-side crop).
+    queried directly for only the features that intersect the
+    "ELIZABETH ST DRAIN (CITY)" sub-catchment (the Melbourne CBD one —
+    the dataset also contains an unrelated "ELIZABETH ST M.D. (COBURG)"
+    sub-catchment in a different suburb). This is a server-side spatial
+    filter, not a client-side crop.
 
 Usage:
-    python scripts/extract_catchment_layers.py [--force-refresh]
+    python scripts/extract.py [--force-refresh]
 """
 
 import argparse
@@ -38,6 +39,7 @@ CATCHMENTS_URL = (
 )
 CATCHMENTS_SOURCE_CRS = "EPSG:28355"  # GDA94 / MGA zone 55, as served by the portal
 CATCHMENT_NAME = "ELIZABETH ST DRAIN (CITY)"
+CATCHMENTS_RAW_PATH = RAW_CACHE_DIR / "melbourne_water_catchments.geojson"
 
 OVERLAY_LAYERS = {
     "lsio": (
@@ -53,7 +55,7 @@ OVERLAY_LAYERS = {
 
 def download_catchments(force_refresh: bool) -> Path:
     RAW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = RAW_CACHE_DIR / "melbourne_water_catchments.geojson"
+    cache_path = CATCHMENTS_RAW_PATH
     if cache_path.exists() and not force_refresh:
         print(f"Using cached catchments file: {cache_path}")
         return cache_path
@@ -149,27 +151,22 @@ def main():
     parser.add_argument(
         "--force-refresh",
         action="store_true",
-        help="Re-download the Melbourne Water catchments dataset even if cached",
+        help="Re-download everything even if already cached in data/raw/",
     )
     args = parser.parse_args()
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
     catchments_path = download_catchments(args.force_refresh)
     catchment_gdf = load_elizabeth_street_catchment(catchments_path)
-
-    catchment_path = DATA_DIR / "elizabeth_street_catchment.geojson"
-    if catchment_path.exists():
-        catchment_path.unlink()
-    catchment_gdf.to_file(catchment_path, driver="GeoJSON")
-    print(f"Saved catchment boundary to {catchment_path}")
-
     catchment_geometry = unary_union(catchment_gdf.geometry)
 
     for layer_name, service_url in OVERLAY_LAYERS.items():
+        overlay_path = RAW_CACHE_DIR / f"{layer_name}.geojson"
+        if overlay_path.exists() and not args.force_refresh:
+            print(f"Using cached {layer_name.upper()} file: {overlay_path}")
+            continue
         print(f"Querying {layer_name.upper()}...")
         geojson = query_overlay(service_url, catchment_geometry)
-        save_geojson(geojson, DATA_DIR / f"{layer_name}.geojson")
+        save_geojson(geojson, overlay_path)
 
 
 if __name__ == "__main__":

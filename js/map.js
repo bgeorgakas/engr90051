@@ -12,30 +12,53 @@ const baseLayers = {
 
 const layerControl = L.control.layers(baseLayers, {}, { collapsed: false }).addTo(map);
 
-function loadOverlay(url, name, style) {
+function fetchOverlay(url, name, style) {
   return fetch(url)
     .then((res) => res.json())
-    .then((geojson) => {
-      const layer = L.geoJSON(geojson, { style }).addTo(map);
-      layerControl.addOverlay(layer, name);
-      return layer;
-    })
-    .catch((err) => console.error(`Failed to load overlay "${name}" from ${url}`, err));
+    .then((geojson) => ({ name, layer: L.geoJSON(geojson, { style }) }))
+    .catch((err) => {
+      console.error(`Failed to load overlay "${name}" from ${url}`, err);
+      return null;
+    });
 }
 
-const catchmentLayer = loadOverlay("data/elizabeth_street_catchment.geojson", "Elizabeth Street catchment", {
+function addOverlay(overlay) {
+  if (!overlay) return null;
+  overlay.layer.addTo(map);
+  layerControl.addOverlay(overlay.layer, overlay.name);
+  return overlay.layer;
+}
+
+const catchmentLayer = fetchOverlay("data/catchment.json", "Elizabeth Street catchment", {
   color: "#111827",
   weight: 2,
   fill: false,
   dashArray: "6 4",
-});
+}).then(addOverlay);
 
-loadOverlay("data/sbo.geojson", "SBO", {
-  color: "#0284c7",
-  weight: 1,
-  fillColor: "#7dd3fc",
-  fillOpacity: 0.35,
-});
+// Largest extent first so the smaller ones draw on top of it. The current-day
+// and 2010 extents are dummy data derived from the 2100 extent (see
+// scripts/transform.py).
+Promise.all([
+  fetchOverlay("data/flood_extent_2100.json", "2100 — 1% AEP (climate change)", {
+    color: "#0284c7",
+    weight: 1,
+    fillColor: "#7dd3fc",
+    fillOpacity: 0.35,
+  }),
+  fetchOverlay("data/flood_extent_2010.json", "2010 flood event (indicative)", {
+    color: "#7c3aed",
+    weight: 1,
+    fillColor: "#a78bfa",
+    fillOpacity: 0.4,
+  }),
+  fetchOverlay("data/flood_extent_current.json", "Current day — 1% AEP (indicative)", {
+    color: "#1e3a8a",
+    weight: 1,
+    fillColor: "#1d4ed8",
+    fillOpacity: 0.45,
+  }),
+]).then((overlays) => overlays.forEach(addOverlay));
 
 let catchmentBounds = null;
 
