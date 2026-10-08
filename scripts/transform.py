@@ -5,26 +5,21 @@ Build the map-ready layers in data/ from the raw downloads in data/raw/
 
 Outputs:
   - catchment.json            Elizabeth Street catchment boundary.
-  - flood_extent_2100.json    1% AEP flood extent in 2100. Real data: the
-                              SBO and LSIO planning overlays dissolved
-                              together, which already include climate
-                              change assumptions.
-  - flood_extent_current.json Current-day 1% AEP flood extent. DUMMY DATA.
-  - flood_extent_2010.json    2010 flood event extent. DUMMY DATA.
+  - flood_extent_2100.json    Union of SBO and LSIO planning boundaries.
+                              Legacy filename, NOT a confirmed 2100 model.
+  - flood_extent_current.json Synthetic demonstration geometry, not used
+                              by the current frontend.
+  - flood_extent_2010.json    Synthetic demonstration geometry, NOT an
+                              observed or modelled 2010 event.
 
-The real current-day and 2010 extents exist but are not public, so both are
-derived from the 2100 extent for the prototype:
+The two synthetic layers are arbitrary erosions of the planning-boundary
+union; the "2010" demo also contains randomly placed restoration areas.
+Their area fractions, nesting and random seed are demonstration choices,
+not hydraulic results or evidence about historical flooding.
 
-  - Current day: the 2100 extent eroded inward (negative buffer) until
-    CURRENT_AREA_FRACTION of its area is left. Flow paths narrow towards
-    their centrelines and thin fringes drop out.
-  - 2010: eroded less, to EVENT_2010_AREA_FRACTION, because the event was
-    around a 1 in 200 year flood (Water Technology estimate) and so larger
-    than a 1 in 100. A real storm is not uniform, so inside a few randomly
-    placed "storm cells" the extent reaches the full 2100 extent.
-
-So current ⊆ 2010 ⊆ 2100. The area fractions are placeholders, not sourced
-figures. The random seed is fixed, so reruns give identical files.
+For official baseline and future model snapshots, use
+scripts/fetch_official_flood_data.py. This legacy script does not write
+data/official/ and cannot replace the official importer.
 
 Usage:
     python scripts/transform.py
@@ -159,14 +154,15 @@ def main():
 
     for label, extent in [("2100", extent_2100), ("2010", extent_2010), ("current", extent_current)]:
         share = extent.area / extent_2100.area
-        print(f"  {label:>8}: {extent.area / 1e4:5.1f} ha ({share:.0%} of 2100)")
+        print(f"  legacy {label:>8}: {extent.area / 1e4:5.1f} ha ({share:.0%} of planning union)")
 
     save_extent(
         extent_2100,
         DATA_DIR / "flood_extent_2100.json",
         {
-            "scenario": "2100_aep1",
-            "label": "2100 — 1% AEP (climate change)",
+            "scenario": "planning_overlay_union",
+            "label": "Planning boundaries (SBO/LSIO; not a 2100 model)",
+            "data_kind": "planning_overlay",
             "synthetic": False,
             "method": "Union of SBO and LSIO planning overlays intersecting the catchment.",
         },
@@ -175,12 +171,13 @@ def main():
         extent_2010,
         DATA_DIR / "flood_extent_2010.json",
         {
-            "scenario": "2010_event",
-            "label": "2010 flood event (indicative)",
+            "scenario": "synthetic_demo_2010",
+            "label": "Synthetic demo (not observed 2010 flooding)",
+            "data_kind": "synthetic_demo",
             "synthetic": True,
             "method": (
-                f"Dummy data. 2100 extent eroded {baseline_distance:.2f}m to "
-                f"{EVENT_2010_AREA_FRACTION:.0%} of its area, restored to the full 2100 extent "
+                f"Dummy data. Planning-boundary union eroded {baseline_distance:.2f}m to "
+                f"{EVENT_2010_AREA_FRACTION:.0%} of its area, restored to the full planning union "
                 f"inside {STORM_CELL_COUNT} random storm cells (seed {RANDOM_SEED})."
             ),
         },
@@ -189,11 +186,12 @@ def main():
         extent_current,
         DATA_DIR / "flood_extent_current.json",
         {
-            "scenario": "current_aep1",
-            "label": "Current day — 1% AEP (indicative)",
+            "scenario": "synthetic_demo_current",
+            "label": "Synthetic demo — current placeholder",
+            "data_kind": "synthetic_demo",
             "synthetic": True,
             "method": (
-                f"Dummy data. 2100 extent eroded {current_distance:.2f}m to "
+                f"Dummy data. Planning-boundary union eroded {current_distance:.2f}m to "
                 f"{CURRENT_AREA_FRACTION:.0%} of its area."
             ),
         },

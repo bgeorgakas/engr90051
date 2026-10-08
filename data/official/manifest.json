@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "publisher": "Melbourne Water Corporation",
+  "title": "Melbourne Water Flood Extent",
+  "retrieved_at_utc": "2026-10-08T02:49:25.069837+00:00",
+  "source_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11",
+  "metadata_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/iteminfo",
+  "source_license_info": null,
+  "reuse_status": "Permission for public redistribution has not been confirmed. Check source terms before publishing these snapshots.",
+  "geometry_processing": "Original server-projected WGS84 polygon coordinates retained, including holes and small polygons; no buffering or simplification.",
+  "limitations": [
+    "Modelled flood extents, not live conditions, warnings, flood depth or address risk ratings.",
+    "Outside a displayed polygon does not mean safe or prove that the location was assessed.",
+    "Baseline and future layers have different study dates and recorded upstream limits; not a like-for-like time comparison.",
+    "AEP means annual exceedance probability, not an event that happens only once every 100 years."
+  ],
+  "datasets": [
+    {
+      "id": "baseline",
+      "label": "Baseline 1% AEP — 2020 study",
+      "file": "data/official/flood_extent_baseline.geojson",
+      "source_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11",
+      "download_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query?where=STUDY_NAME%3D%27ELIZABETH+ST+DRAIN+%28CITY%29%27+AND+FLOOD_EVENT%3D%271PCT%27+AND+MODELLING_SCENARIO%3D%27Existing+Condition%27&objectIds=596&outFields=OBJECTID%2CSTUDY_NAME%2CUPSTREAM_LIMIT%2CDOWNSTREAM_LIMIT%2CSTUDY_BY%2CSTUDY_DATE%2CACCEPTED_ON%2CACCEPTED_BY%2CSURVEY_SOURCES%2CCALCULATION_METHOD%2CFLOOD_TYPE%2CFLOOD_EVENT%2CMODELLING_SCENARIO%2CCOMMENTS%2CMERGE_SRC&returnGeometry=true&returnZ=false&returnM=false&outSR=4326&f=geojson",
+      "records_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query?where=STUDY_NAME%3D%27ELIZABETH+ST+DRAIN+%28CITY%29%27+AND+FLOOD_EVENT%3D%271PCT%27+AND+MODELLING_SCENARIO%3D%27Existing+Condition%27&outFields=OBJECTID%2CSTUDY_NAME%2CUPSTREAM_LIMIT%2CDOWNSTREAM_LIMIT%2CSTUDY_BY%2CSTUDY_DATE%2CACCEPTED_ON%2CACCEPTED_BY%2CSURVEY_SOURCES%2CCALCULATION_METHOD%2CFLOOD_TYPE%2CFLOOD_EVENT%2CMODELLING_SCENARIO%2CCOMMENTS%2CMERGE_SRC&returnGeometry=false&f=pjson",
+      "study_name": "ELIZABETH ST DRAIN (CITY)",
+      "aep": "1PCT",
+      "modelling_scenario": "Existing Condition",
+      "study_date": "2020-08-13",
+      "synthetic": false,
+      "feature_count": 1,
+      "object_ids": [
+        596
+      ],
+      "coordinate_count": 48187,
+      "upstream_limits": [
+        "Lytton Street"
+      ],
+      "downstream_limits": [
+        "Yarra River"
+      ],
+      "sha256": "ed8b2d9d0b4b2cd6fae83088656c8893a87c52354774c654a7f5cf8a32c9c04f"
+    },
+    {
+      "id": "future_2100",
+      "label": "2100 RCP 8.5, 1% AEP — 2017 study",
+      "file": "data/official/flood_extent_2100.geojson",
+      "source_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11",
+      "download_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query?where=STUDY_NAME%3D%27ELIZABETH+ST+DRAIN+%28CITY%29%27+AND+FLOOD_EVENT%3D%271PCT%27+AND+MODELLING_SCENARIO%3D%27Yr+2100%2C+RCP+8.5%27&objectIds=7%2C8%2C9&outFields=OBJECTID%2CSTUDY_NAME%2CUPSTREAM_LIMIT%2CDOWNSTREAM_LIMIT%2CSTUDY_BY%2CSTUDY_DATE%2CACCEPTED_ON%2CACCEPTED_BY%2CSURVEY_SOURCES%2CCALCULATION_METHOD%2CFLOOD_TYPE%2CFLOOD_EVENT%2CMODELLING_SCENARIO%2CCOMMENTS%2CMERGE_SRC&returnGeometry=true&returnZ=false&returnM=false&outSR=4326&f=geojson",
+      "records_url": "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query?where=STUDY_NAME%3D%27ELIZABETH+ST+DRAIN+%28CITY%29%27+AND+FLOOD_EVENT%3D%271PCT%27+AND+MODELLING_SCENARIO%3D%27Yr+2100%2C+RCP+8.5%27&outFields=OBJECTID%2CSTUDY_NAME%2CUPSTREAM_LIMIT%2CDOWNSTREAM_LIMIT%2CSTUDY_BY%2CSTUDY_DATE%2CACCEPTED_ON%2CACCEPTED_BY%2CSURVEY_SOURCES%2CCALCULATION_METHOD%2CFLOOD_TYPE%2CFLOOD_EVENT%2CMODELLING_SCENARIO%2CCOMMENTS%2CMERGE_SRC&returnGeometry=false&f=pjson",
+      "study_name": "ELIZABETH ST DRAIN (CITY)",
+      "aep": "1PCT",
+      "modelling_scenario": "Yr 2100, RCP 8.5",
+      "study_date": "2017-08-31",
+      "synthetic": false,
+      "feature_count": 3,
+      "object_ids": [
+        7,
+        8,
+        9
+      ],
+      "coordinate_count": 9032,
+      "upstream_limits": [
+        "THERRY STREET MELBOURNE"
+      ],
+      "downstream_limits": [
+        "YARRA RIVER"
+      ],
+      "sha256": "d0a6b89a1a9840c6d7a159d43807872c7aac62832d355af0e6de4de50f2c4426"
+    }
+  ]
+}
