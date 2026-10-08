@@ -10,7 +10,16 @@ const baseLayers = {
   "Stadia Alidade Smooth": stadiaBase,
 };
 
-const layerControl = L.control.layers(baseLayers, {}, { collapsed: false }).addTo(map);
+const layerControl = L.control.layers(baseLayers, {}, { collapsed: true }).addTo(map);
+if (map.getSize().x > 640) layerControl.expand();
+
+let addressPanel = null;
+let selectedLocation = null;
+let searchMarker = null;
+let catchmentBounds = null;
+let catchmentPrepared = null;
+let catchmentState = "loading";
+const prototypePrepared = new Map();
 
 const mapLoadWarning = document.getElementById("map-load-warning");
 const failedOptionalLayers = new Set();
@@ -29,7 +38,7 @@ function fetchOverlay(url, name, style) {
       }
       return geojson;
     })
-    .then((geojson) => ({ name, layer: L.geoJSON(geojson, { style }) }))
+    .then((geojson) => ({ name, geojson, layer: L.geoJSON(geojson, { style }) }))
     .catch((err) => {
       console.error(`Failed to load overlay "${name}" from ${url}`, err);
       reportLayerFailure(name);
@@ -49,35 +58,42 @@ const catchmentLayer = fetchOverlay("data/catchment.json", "Elizabeth Street cat
   weight: 2,
   fill: false,
   dashArray: "6 4",
-}).then(addOverlay);
+}).then((overlay) => {
+  if (!overlay) {
+    catchmentState = "failed";
+    addressPanel?.refresh();
+    return null;
+  }
+  try {
+    catchmentPrepared = AddressLookup.prepareCollection(overlay.geojson);
+    catchmentState = "loaded";
+  } catch (err) {
+    catchmentState = "failed";
+    console.error("Catchment geometry cannot be used for address lookup", err);
+  }
+  addressPanel?.refresh();
+  return addOverlay(overlay);
+});
 
-// Legacy files remain available for prototype comparison only. They are NOT
-// the official model snapshots and are off by default. The filename is kept
-// so existing extraction/transform workflows are not broken.
-fetchOverlay("data/flood_extent_2100.json", "Planning boundaries (SBO/LSIO; not a 2100 model)", {
-    color: "#0284c7",
-    weight: 1,
-    fillColor: "#7dd3fc",
-    fillOpacity: 0.12,
-  }).then((overlay) => addOverlay(overlay, false));
-fetchOverlay("data/flood_extent_2010.json", "Synthetic demo (not observed 2010 flooding)", {
-    color: "#7c3aed",
-    weight: 1,
-    fillColor: "#a78bfa",
-    fillOpacity: 0.2,
-  }).then((overlay) => addOverlay(overlay, false));
+// Restore the original three prototype layers, in their original draw order.
+// Their legacy names are retained; the persistent notices explain their data types.
+const prototypeDatasets = PrototypeData.DATASETS;
+const prototypeStyles = [
+  { color: "#0284c7", weight: 1, fillColor: "#7dd3fc", fillOpacity: 0.35 },
+  { color: "#7c3aed", weight: 1, fillColor: "#a78bfa", fillOpacity: 0.4 },
+  { color: "#1e3a8a", weight: 1, fillColor: "#1d4ed8", fillOpacity: 0.45 },
+];
+prototypeDatasets.forEach((dataset, index) => {
+  map.createPane(dataset.id);
+  map.getPane(dataset.id).style.zIndex = 410 + index * 10;
+});
 
-// A separate pane makes the optional future outline readable on top of the
-// baseline. It does NOT assert that either scenario contains the other.
-map.createPane("officialFuture");
-map.getPane("officialFuture").style.zIndex = 450;
-
-const officialStatus = document.getElementById("official-status");
-const retryOfficialData = document.getElementById("retry-official-data");
+const layerStatus = document.getElementById("layer-status");
+const retryLayerData = document.getElementById("retry-layer-data");
 const datasetSources = document.getElementById("dataset-sources");
-const officialLayers = new Map();
-const officialStates = new Map();
-let loadingOfficialData = false;
+const prototypeLayers = new Map();
+const prototypeStates = new Map();
+let loadingPrototypeData = false;
 
 function sourceLink(label, href) {
   const a = document.createElement("a");
@@ -88,163 +104,186 @@ function sourceLink(label, href) {
   return a;
 }
 
-function updateOfficialStatus() {
-  const names = { baseline: "Baseline (blue fill)", future_2100: "2100 scenario (orange outline)" };
-  officialStatus.replaceChildren();
-  for (const [id, name] of Object.entries(names)) {
+function updateLayerStatus() {
+  layerStatus.replaceChildren();
+  for (const { id, label } of prototypeDatasets) {
     const line = document.createElement("p");
-    const state = officialStates.get(id) || "loading";
-    const layer = officialLayers.get(id);
-    line.textContent = `${name}: ${state === "loaded" ? (map.hasLayer(layer) ? "loaded · shown" : "loaded · hidden") : state === "failed" ? "failed to load — not evidence of no flooding" : "loading…"}`;
+    const state = prototypeStates.get(id) || "loading";
+    const layer = prototypeLayers.get(id);
+    line.textContent = `${label}: ${state === "loaded" ? (map.hasLayer(layer) ? "loaded · shown" : "loaded · hidden") : state === "failed" ? "failed to load — not evidence of no flooding" : "loading…"}`;
     line.className = state === "failed" ? "data-error" : "data-state";
-    officialStatus.appendChild(line);
+    layerStatus.appendChild(line);
   }
+  addressPanel?.refresh();
 }
 
-function renderSources(manifest) {
+function renderSources() {
   datasetSources.replaceChildren();
-  manifest.datasets.forEach((dataset) => {
+  prototypeDatasets.forEach((dataset) => {
     const section = document.createElement("section");
     const heading = document.createElement("h3");
     heading.textContent = dataset.label;
     section.appendChild(heading);
     const text = document.createElement("p");
-    text.textContent = `${manifest.publisher}. Study date: ${dataset.study_date}. Scenario: ${dataset.modelling_scenario}. Recorded upstream limit: ${dataset.upstream_limits.join(", ") || "not provided"}.`;
+    text.textContent = dataset.description;
     section.appendChild(text);
-    section.appendChild(sourceLink("Official source", dataset.source_url));
+    section.appendChild(sourceLink("Layer data", dataset.file));
     section.appendChild(document.createTextNode(" · "));
-    section.appendChild(sourceLink("Source records", dataset.records_url));
+    section.appendChild(sourceLink("How this layer was made", dataset.source_url));
     datasetSources.appendChild(section);
   });
-  const snapshot = document.createElement("p");
-  snapshot.textContent = `Local snapshot retrieved ${manifest.retrieved_at_utc.slice(0, 10)} (UTC). Not automatically updated.`;
-  datasetSources.appendChild(snapshot);
 }
 
-function featureDetails(feature, dataset) {
+function featureDetails(dataset) {
   const container = document.createElement("div");
   const heading = document.createElement("strong");
   heading.textContent = dataset.label;
   container.appendChild(heading);
   const p = document.createElement("p");
-  p.textContent = `Modelled extent · study ${dataset.study_date} · record ${feature.properties.OBJECTID}. Not a live warning or an address risk rating.`;
+  p.textContent = dataset.description;
   container.appendChild(p);
-  container.appendChild(sourceLink("Melbourne Water source record", dataset.records_url));
+  container.appendChild(sourceLink("How this layer was made", dataset.source_url));
   return container;
 }
 
-async function loadOfficialData() {
-  if (loadingOfficialData) return;
-  loadingOfficialData = true;
-  retryOfficialData.hidden = true;
-  for (const id of ["baseline", "future_2100"]) {
-    if (!officialLayers.has(id)) officialStates.set(id, "loading");
-  }
-  updateOfficialStatus();
-  try {
-    const manifest = FloodData.validateManifest(await FloodData.fetchJSON("data/official/manifest.json"));
-    renderSources(manifest);
-    await Promise.all(manifest.datasets.map(async (dataset) => {
-      if (officialLayers.has(dataset.id)) return;
-      try {
-        const geojson = FloodData.validateExtent(await FloodData.fetchJSON(dataset.file), dataset);
-        const isBaseline = dataset.id === "baseline";
-        const layer = L.geoJSON(geojson, {
-          pane: isBaseline ? "overlayPane" : "officialFuture",
-          style: isBaseline
-            ? { color: "#1e40af", weight: 1.5, fillColor: "#2563eb", fillOpacity: 0.32 }
-            : { color: "#b45309", weight: 2.5, dashArray: "7 4", fill: false },
-          onEachFeature: (feature, featureLayer) => featureLayer.bindPopup(featureDetails(feature, dataset)),
-        });
-        officialLayers.set(dataset.id, layer);
-        officialStates.set(dataset.id, "loaded");
-        layerControl.addOverlay(layer, dataset.label);
-        if (isBaseline) layer.addTo(map);
-      } catch (err) {
-        console.error(`Official layer ${dataset.id} failed`, err);
-        officialStates.set(dataset.id, "failed");
-      }
-      updateOfficialStatus();
-    }));
-  } catch (err) {
-    console.error("Official source manifest failed", err);
-    for (const id of ["baseline", "future_2100"]) {
-      if (!officialLayers.has(id)) officialStates.set(id, "failed");
-    }
-    updateOfficialStatus();
-  } finally {
-    loadingOfficialData = false;
-    retryOfficialData.hidden = ![...officialStates.values()].includes("failed");
+function syncPrototypeControls() {
+  for (const layer of prototypeLayers.values()) layerControl.removeLayer(layer);
+  for (const dataset of prototypeDatasets) {
+    const layer = prototypeLayers.get(dataset.id);
+    if (layer) layerControl.addOverlay(layer, dataset.label);
   }
 }
 
-map.on("overlayadd overlayremove", updateOfficialStatus);
-retryOfficialData.addEventListener("click", loadOfficialData);
-loadOfficialData();
+async function loadPrototypeData() {
+  if (loadingPrototypeData) return;
+  loadingPrototypeData = true;
+  retryLayerData.hidden = true;
+  for (const { id } of prototypeDatasets) {
+    if (!prototypeLayers.has(id)) prototypeStates.set(id, "loading");
+  }
+  updateLayerStatus();
+  try {
+    await Promise.all(prototypeDatasets.map(async (dataset, index) => {
+      if (prototypeLayers.has(dataset.id)) return;
+      try {
+        const geojson = PrototypeData.validateExtent(await FloodData.fetchJSON(dataset.file), dataset);
+        const prepared = AddressLookup.prepareCollection(geojson);
+        const layer = L.geoJSON(geojson, {
+          pane: dataset.id,
+          style: prototypeStyles[index],
+          onEachFeature: (_feature, featureLayer) => featureLayer.bindPopup(featureDetails(dataset)),
+        });
+        prototypeLayers.set(dataset.id, layer);
+        prototypePrepared.set(dataset.id, prepared);
+        prototypeStates.set(dataset.id, "loaded");
+        syncPrototypeControls();
+        layer.addTo(map);
+      } catch (err) {
+        console.error(`Prototype layer ${dataset.id} failed`, err);
+        prototypeStates.set(dataset.id, "failed");
+      }
+      updateLayerStatus();
+    }));
+  } finally {
+    loadingPrototypeData = false;
+    retryLayerData.hidden = ![...prototypeStates.values()].includes("failed");
+  }
+}
 
-let catchmentBounds = null;
+renderSources();
+map.on("overlayadd overlayremove", updateLayerStatus);
+retryLayerData.addEventListener("click", loadPrototypeData);
+loadPrototypeData();
 
 catchmentLayer.then((layer) => {
   if (layer) {
     catchmentBounds = layer.getBounds();
-    map.fitBounds(catchmentBounds);
+    if (!selectedLocation) map.fitBounds(catchmentBounds);
   }
 });
 
-let searchMarker = null;
-const addressSearchMessage = document.getElementById("address-search-message");
+// The endpoint is server-hosted configuration, so it can be replaced/disabled
+// without changing the browser module. No geocoding occurs until submission.
+let searchClient = null;
+let searchGeneration = 0;
+const searchClientReady = FloodData.fetchJSON("data/search-config.json")
+  .then((config) => {
+    if (config.enabled !== true) return null;
+    if (typeof config.endpoint !== "string" || !config.endpoint.trim()) return null;
+    searchClient = AddressSearch.createClient({
+      endpoint: config.endpoint,
+      minIntervalMs: config.minIntervalMs,
+      timeoutMs: config.timeoutMs,
+    });
+    return searchClient;
+  })
+  .catch(() => null);
 
-function showSearchMessage(text) {
-  addressSearchMessage.textContent = text;
-  addressSearchMessage.classList.add("visible");
-}
-
-function hideSearchMessage() {
-  addressSearchMessage.classList.remove("visible");
-}
-
-document.getElementById("address-search").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const query = document.getElementById("address-search-input").value.trim();
-  if (!query) return;
-
-  hideSearchMessage();
-
-  const params = new URLSearchParams({
-    format: "json",
-    limit: "1",
-    countrycodes: "au",
-    q: query,
-  });
-  if (catchmentBounds) {
-    params.set(
-      "viewbox",
-      [
-        catchmentBounds.getWest(),
-        catchmentBounds.getNorth(),
-        catchmentBounds.getEast(),
-        catchmentBounds.getSouth(),
-      ].join(",")
-    );
+function recenterAddress(result) {
+  map.setView([result.lat, result.lon], 17, { animate: false });
+  // Keep the pin in the unobscured map area, including the mobile bottom sheet.
+  const size = map.getSize();
+  const panel = document.getElementById("address-panel");
+  if (!panel.hidden) {
+    if (size.x <= 640) map.panBy([0, panel.offsetHeight / 2], { animate: false });
+    else map.panBy([panel.offsetWidth / 2, 0], { animate: false });
   }
+}
 
-  FloodData.fetchJSON(`https://nominatim.openstreetmap.org/search?${params}`)
-    .then((results) => {
-      if (!results.length) {
-        showSearchMessage(`No results found for "${query}"`);
-        return;
-      }
+addressPanel = AddressPanel.create({
+  searchClient: {
+    cancel() { searchGeneration += 1; searchClient?.cancel(); },
+    async search(query, options) {
+      const request = ++searchGeneration;
+      const client = await searchClientReady;
+      if (request !== searchGeneration) throw Object.assign(new Error("Search cancelled"), { code: "CANCELLED" });
+      if (!client) throw Object.assign(new Error("Search unavailable"), { code: "REQUEST_FAILED" });
+      return client.search(query, options);
+    },
+  },
+  getViewbox: () => catchmentBounds
+    ? [catchmentBounds.getWest(), catchmentBounds.getNorth(), catchmentBounds.getEast(), catchmentBounds.getSouth()]
+    : undefined,
+  getData: () => ({
+    catchment: { state: catchmentState, prepared: catchmentPrepared },
+    datasets: prototypeDatasets.map((metadata) => ({
+      id: metadata.id,
+      state: prototypeStates.get(metadata.id) || "loading",
+      metadata,
+      prepared: prototypePrepared.get(metadata.id),
+      visible: prototypeLayers.has(metadata.id) && map.hasLayer(prototypeLayers.get(metadata.id)),
+    })),
+  }),
+  onOpen() {
+    closeStoryPanel();
+    if (map.getSize().x <= 640) layerControl.collapse();
+  },
+  onClear() {
+    selectedLocation = null;
+    if (searchMarker) map.removeLayer(searchMarker);
+    searchMarker = null;
+  },
+  onSelect(result) {
+    selectedLocation = result;
+    if (searchMarker) map.removeLayer(searchMarker);
+    const popup = document.createElement("div");
+    popup.textContent = "Selected geocoded point. See Address lookup for prototype layer matches, not a flood-risk assessment.";
+    searchMarker = L.marker([result.lat, result.lon], { title: "Selected address point" }).addTo(map).bindPopup(popup);
+    recenterAddress(result);
+  },
+  onRecenter: recenterAddress,
+  onShowLayer(id) {
+    const layer = prototypeLayers.get(id);
+    if (layer && !map.hasLayer(layer)) layer.addTo(map);
+    updateLayerStatus();
+  },
+  onRetry: loadPrototypeData,
+});
 
-      const { lat, lon, display_name } = results[0];
-      if (searchMarker) {
-        map.removeLayer(searchMarker);
-      }
-      const result = document.createElement("div");
-      result.textContent = `${display_name}. Location only — no flood-risk assessment has been calculated.`;
-      searchMarker = L.marker([lat, lon]).addTo(map).bindPopup(result).openPopup();
-      map.setView([lat, lon], 17);
-    })
-    .catch(() => showSearchMessage("Address search failed — try again."));
+map.on("resize", () => {
+  if (map.getSize().x <= 640) layerControl.collapse();
+  else layerControl.expand();
+  if (selectedLocation) recenterAddress(selectedLocation);
 });
 
 const cameraIcon = L.divIcon({
@@ -272,6 +311,7 @@ const storyPanelCredit = document.getElementById("story-panel-credit");
 const storyPanelLinks = document.getElementById("story-panel-links");
 
 function openStoryPanel(story) {
+  addressPanel?.close();
   storyPanelImage.style.display = story.image ? "" : "none";
   if (story.image) {
     storyPanelImage.src = story.image;
