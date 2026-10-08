@@ -9,52 +9,34 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const ROOT = path.resolve(__dirname, "..");
-const SOURCE = "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11";
-const MANIFEST = "data/official/manifest.json";
-const BASELINE = "data/official/baseline.geojson";
-const FUTURE = "data/official/future_2100.geojson";
+const LEGACY_2100 = "data/flood_extent_2100.json";
+const DEMO_2010 = "data/flood_extent_2010.json";
+const DEMO_CURRENT = "data/flood_extent_current.json";
+const CATALOG = [
+  { id: "legacy_2100", file: LEGACY_2100, label: "2100 — 1% AEP (climate change)", data_kind: "planning_overlay", synthetic: false, scenario: "planning_overlay_union" },
+  { id: "demo_2010", file: DEMO_2010, label: "2010 flood event (indicative)", data_kind: "synthetic_demo", synthetic: true, scenario: "synthetic_demo_2010" },
+  { id: "demo_current", file: DEMO_CURRENT, label: "Current day — 1% AEP (indicative)", data_kind: "synthetic_demo", synthetic: true, scenario: "synthetic_demo_current" },
+];
 const SEARCH_CONFIG = "data/search-config.json";
 const GEOCODER = "https://nominatim.openstreetmap.org/search";
 const clone = (value) => structuredClone(value);
 
-function sourceManifest() {
-  return {
-    schema_version: 1,
-    source_url: SOURCE,
-    publisher: "Test publisher",
-    retrieved_at_utc: "2026-10-08T00:00:00Z",
-    datasets: [
-      { id: "baseline", file: BASELINE, modelling_scenario: "Existing Condition", study_date: "2020-08-13", feature_count: 1, object_ids: [100], label: "Official baseline (2020 study)" },
-      { id: "future_2100", file: FUTURE, modelling_scenario: "Yr 2100, RCP 8.5", study_date: "2017-08-31", feature_count: 3, object_ids: [101, 102, 103], label: "Official 2100 (2017 study)" },
-    ].map((entry) => ({
-      ...entry,
-      study_name: "ELIZABETH ST DRAIN (CITY)",
-      aep: "1PCT",
-      synthetic: false,
-      source_url: SOURCE,
-      records_url: `${SOURCE}/query?where=OBJECTID%3D${entry.object_ids[0]}`,
-      upstream_limits: ["Test study boundary"],
-    })),
-  };
-}
-
 function extent(metadata, [west, south, east, north] = [144.96, -37.81, 144.97, -37.80]) {
   return {
     type: "FeatureCollection",
-    features: metadata.object_ids.map((OBJECTID) => ({
+    features: [{
       type: "Feature",
+      id: metadata.id,
       properties: {
-        OBJECTID,
-        STUDY_NAME: metadata.study_name,
-        FLOOD_EVENT: metadata.aep,
-        MODELLING_SCENARIO: metadata.modelling_scenario,
-        STUDY_DATE: Date.parse(`${metadata.study_date}T00:00:00Z`),
+        data_kind: metadata.data_kind,
+        synthetic: metadata.synthetic,
+        scenario: metadata.scenario,
       },
       geometry: {
         type: "Polygon",
         coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]],
       },
-    })),
+    }],
   };
 }
 
@@ -114,15 +96,10 @@ class Element {
 }
 
 function harness(overrides = {}) {
-  const manifest = sourceManifest();
-  const smallLayer = extent(manifest.datasets[0]);
+  const smallLayer = extent({ ...CATALOG[0], id: "catchment" });
   const routes = new Map([
-    [MANIFEST, () => ok(manifest)],
-    [BASELINE, () => ok(extent(manifest.datasets[0]))],
-    [FUTURE, () => ok(extent(manifest.datasets[1]))],
+    ...CATALOG.map((dataset) => [dataset.file, () => ok(extent(dataset))]),
     ["data/catchment.json", () => ok(smallLayer)],
-    ["data/flood_extent_2100.json", () => ok(smallLayer)],
-    ["data/flood_extent_2010.json", () => ok(smallLayer)],
     ["data/flood_stories.json", () => ok([])],
     [SEARCH_CONFIG, () => ok(searchConfig())],
     ...Object.entries(overrides),
@@ -135,7 +112,7 @@ function harness(overrides = {}) {
   const nodes = new Map();
   const document = { activeElement: null };
   const initiallyHidden = new Set([
-    "map-load-warning", "retry-official-data", "address-panel", "address-candidates",
+    "map-load-warning", "retry-layer-data", "address-panel", "address-candidates",
     "address-selection", "address-retry-data",
   ]);
   const element = (id) => {
@@ -173,6 +150,7 @@ function harness(overrides = {}) {
     collapse() { this.expanded = false; return this; },
     addTo() { return this; },
     addOverlay(layer, name) { this.overlays.push({ layer, name }); return this; },
+    removeLayer(layer) { this.overlays = this.overlays.filter((entry) => entry.layer !== layer); return this; },
   };
   const createdGeoJSON = [];
   const markers = [];
@@ -228,16 +206,16 @@ function harness(overrides = {}) {
       throw new Error(`Unexpected stubbed request: ${url}`);
     },
   });
-  for (const script of ["js/flood-data.js", "js/address-lookup.js", "js/address-search.js", "js/address-panel.js", "js/map.js"]) {
+  for (const script of ["js/flood-data.js", "js/prototype-data.js", "js/address-lookup.js", "js/address-search.js", "js/address-panel.js", "js/map.js"]) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, script), "utf8"), context, { filename: script });
   }
   return {
-    map, control, routes, requests, requestDetails, errors, element, document, createdGeoJSON, markers, manifest,
+    map, control, routes, requests, requestDetails, errors, element, document, createdGeoJSON, markers,
     evaluate: (expression) => vm.runInContext(expression, context),
     settle: () => new Promise(setImmediate),
-    retry: () => element("retry-official-data").dispatch("click"),
-    official(id) { return vm.runInContext(`officialLayers.get(${JSON.stringify(id)})`, context); },
-    state(id) { return vm.runInContext(`officialStates.get(${JSON.stringify(id)})`, context); },
+    retry: () => element("retry-layer-data").dispatch("click"),
+    layer(id) { return vm.runInContext(`prototypeLayers.get(${JSON.stringify(id)})`, context); },
+    state(id) { return vm.runInContext(`prototypeStates.get(${JSON.stringify(id)})`, context); },
     countRequests(url) { return requests.filter((request) => request === url).length; },
     stubGeocoder(response) {
       prefixRoutes.set(`${GEOCODER}?`, typeof response === "function" ? response : () => ok(response));
@@ -250,166 +228,194 @@ function harness(overrides = {}) {
   };
 }
 
-test("startup shows loading, then only the official baseline is enabled by default", async () => {
+test("startup loads and shows exactly the original three prototype flood layers in catalog order", async () => {
   const h = harness();
-  assert.match(h.element("official-status").textContent, /loading/);
-  assert.equal(h.element("retry-official-data").hidden, true);
+  assert.match(h.element("layer-status").textContent, /loading/i);
+  assert.equal(h.element("retry-layer-data").hidden, true);
   await h.settle();
-  assert.equal(h.state("baseline"), "loaded");
-  assert.equal(h.state("future_2100"), "loaded");
-  assert.equal(h.map.hasLayer(h.official("baseline")), true);
-  assert.equal(h.map.hasLayer(h.official("future_2100")), false);
-  for (const entry of h.control.overlays.filter(({ name }) => /Planning boundaries|Synthetic demo/.test(name))) {
-    assert.equal(h.map.hasLayer(entry.layer), false);
+  const catalog = JSON.parse(h.evaluate("JSON.stringify(PrototypeData.DATASETS.map(({ id, label, file }) => ({ id, label, file })))"));
+  assert.deepEqual(catalog, CATALOG.map(({ id, label, file }) => ({ id, label, file })));
+  const displayed = h.control.overlays.filter(({ name }) => CATALOG.some((dataset) => dataset.label === name));
+  assert.deepEqual(displayed.map(({ name }) => name), CATALOG.map(({ label }) => label));
+  for (const dataset of CATALOG) {
+    assert.equal(h.state(dataset.id), "loaded");
+    assert.equal(h.map.hasLayer(h.layer(dataset.id)), true);
+    assert.equal(h.countRequests(dataset.file), 1);
+    assert.notEqual(h.layer(dataset.id).options.style.fill, false);
   }
-  assert.equal(h.control.overlays.filter(({ name }) => /Planning boundaries|Synthetic demo/.test(name)).length, 2);
-  assert.equal(h.requests.includes("data/flood_extent_current.json"), false);
-  assert.match(h.element("official-status").textContent, /Baseline \(blue fill\): loaded · shown/);
-  assert.match(h.element("official-status").textContent, /2100 scenario \(orange outline\): loaded · hidden/);
+  assert.deepEqual(CATALOG.map(({ id }) => h.layer(id).options.style.fillColor), ["#7dd3fc", "#a78bfa", "#1d4ed8"]);
+  assert.deepEqual(CATALOG.map(({ id }) => h.layer(id).options.style.fillOpacity), [0.35, 0.4, 0.45]);
+  assert.equal(h.requests.some((url) => url.startsWith("data/official/")), false);
+  assert.equal(h.control.overlays.some(({ name }) => /Official baseline|Official 2100|2020 study|2017 study/.test(name)), false);
   assert.equal(h.errors.length, 0);
 });
 
-test("a failed baseline does not display data or prevent the future layer loading", async () => {
-  const h = harness({ [BASELINE]: () => httpError(404) });
+test("a failed prototype layer does not prevent the other two loading", async () => {
+  const h = harness({ [LEGACY_2100]: () => httpError(404) });
   await h.settle();
-  assert.equal(h.official("baseline"), undefined);
-  assert.equal(h.state("baseline"), "failed");
-  assert.equal(h.state("future_2100"), "loaded");
-  assert.equal(h.map.hasLayer(h.official("future_2100")), false);
-  assert.equal(h.element("retry-official-data").hidden, false);
-  assert.match(h.element("official-status").textContent, /not evidence of no flooding/);
+  assert.equal(h.state("legacy_2100"), "failed");
+  assert.equal(h.state("demo_2010"), "loaded");
+  assert.equal(h.state("demo_current"), "loaded");
+  assert.equal(h.map.hasLayer(h.layer("demo_2010")), true);
+  assert.equal(h.map.hasLayer(h.layer("demo_current")), true);
+  assert.equal(h.element("retry-layer-data").hidden, false);
+  assert.match(h.element("layer-status").textContent, /not evidence of no flooding|does not mean no flooding/);
 });
 
-test("future HTTP failure and retry preserve the loaded baseline without duplicate controls", async () => {
-  const h = harness({ [FUTURE]: () => httpError() });
+test("layer retry preserves loaded geometries without duplicate requests or controls", async () => {
+  const h = harness({ [DEMO_2010]: () => httpError() });
   await h.settle();
-  const baseline = h.official("baseline");
-  assert.equal(h.map.hasLayer(baseline), true);
-  assert.equal(h.state("future_2100"), "failed");
-  h.routes.set(FUTURE, () => ok(extent(h.manifest.datasets[1])));
+  const planning = h.layer("legacy_2100");
+  const current = h.layer("demo_current");
+  h.map.removeLayer(planning);
+  h.map.fire("overlayremove");
+  h.routes.set(DEMO_2010, () => ok(extent(CATALOG[1])));
   await h.retry();
-  assert.strictEqual(h.official("baseline"), baseline);
-  assert.equal(h.state("future_2100"), "loaded");
-  assert.equal(h.map.hasLayer(h.official("future_2100")), false);
-  assert.equal(h.element("retry-official-data").hidden, true);
-  assert.equal(h.countRequests(BASELINE), 1);
-  assert.equal(h.countRequests(FUTURE), 2);
-  assert.equal(h.control.overlays.filter(({ name }) => name === h.manifest.datasets[0].label).length, 1);
-  assert.equal(h.control.overlays.filter(({ name }) => name === h.manifest.datasets[1].label).length, 1);
-  await h.evaluate("loadOfficialData()");
-  assert.equal(h.countRequests(BASELINE), 1);
-  assert.equal(h.countRequests(FUTURE), 2);
-});
-
-test("manifest HTTP failure prevents official requests and recovers on retry", async () => {
-  const h = harness({ [MANIFEST]: () => httpError() });
   await h.settle();
-  assert.equal(h.official("baseline"), undefined);
-  assert.equal(h.official("future_2100"), undefined);
-  assert.equal(h.state("baseline"), "failed");
-  assert.equal(h.state("future_2100"), "failed");
-  assert.equal(h.countRequests(BASELINE), 0);
-  assert.equal(h.countRequests(FUTURE), 0);
-  assert.equal(h.element("retry-official-data").hidden, false);
-  h.routes.set(MANIFEST, () => ok(h.manifest));
+  assert.strictEqual(h.layer("legacy_2100"), planning);
+  assert.strictEqual(h.layer("demo_current"), current);
+  assert.equal(h.map.hasLayer(planning), false, "Retry must not re-enable a layer the user hid");
+  assert.equal(h.state("demo_2010"), "loaded");
+  assert.equal(h.map.hasLayer(h.layer("demo_2010")), true);
+  assert.equal(h.element("retry-layer-data").hidden, true);
+  assert.equal(h.countRequests(LEGACY_2100), 1);
+  assert.equal(h.countRequests(DEMO_2010), 2);
+  assert.equal(h.countRequests(DEMO_CURRENT), 1);
+  for (const { label } of CATALOG) {
+    assert.equal(h.control.overlays.filter(({ name }) => name === label).length, 1);
+  }
   await h.retry();
-  assert.equal(h.state("baseline"), "loaded");
-  assert.equal(h.state("future_2100"), "loaded");
-  assert.equal(h.countRequests(BASELINE), 1);
-  assert.equal(h.countRequests(FUTURE), 1);
+  assert.equal(h.countRequests(DEMO_2010), 2);
+  assert.equal(h.requests.some((url) => url.startsWith("data/official/")), false);
 });
 
-test("a manifest from another source is not used to request or display official layers", async () => {
-  const manifest = sourceManifest();
-  manifest.source_url = "https://example.test/unverified";
-  const h = harness({ [MANIFEST]: () => ok(manifest) });
+test("address membership uses the distinct geometry displayed by each prototype layer", async () => {
+  const geometries = [
+    extent(CATALOG[0], [144.964, -37.806, 144.966, -37.804]),
+    extent(CATALOG[1], [144.965, -37.81, 144.97, -37.80]),
+    extent(CATALOG[2], [144.96, -37.81, 144.963, -37.80]),
+  ];
+  const h = harness(Object.fromEntries(CATALOG.map((dataset, index) => [dataset.file, () => ok(geometries[index])])));
+  h.stubGeocoder([geocoded()]);
   await h.settle();
-  assert.equal(h.countRequests(BASELINE), 0);
-  assert.equal(h.countRequests(FUTURE), 0);
-  assert.equal(h.evaluate("officialLayers.size"), 0);
-  assert.equal(h.state("baseline"), "failed");
+  await h.submit("Public test place Melbourne");
+  h.choose();
+  const expected = ["inside", "boundary", "outside"];
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), expected.map((relation) => `scenario-status ${relation}`));
+  CATALOG.forEach((dataset, index) => {
+    assert.deepEqual(h.layer(dataset.id).data, geometries[index]);
+    assert.equal(h.evaluate(`AddressLookup.lookupPoint([144.965, -37.805], prototypePrepared.get(${JSON.stringify(dataset.id)})).relation`), expected[index]);
+    assert.equal(h.control.overlays.find(({ name }) => name === dataset.label).layer, h.layer(dataset.id));
+    assert.equal(h.countRequests(dataset.file), 1);
+    h.map.removeLayer(h.layer(dataset.id));
+  });
+  h.map.fire("overlayremove");
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), expected.map((relation) => `scenario-status ${relation}`));
+  assert.equal(h.requests.some((url) => url.startsWith("data/official/")), false);
 });
 
 for (const [description, mutate] of [
-  ["another scenario", (data) => { data.features[0].properties.MODELLING_SCENARIO = "Existing Condition"; }],
-  ["another study", (data) => { data.features[0].properties.STUDY_NAME = "UNRELATED CATCHMENT"; }],
-  ["truncated features", (data) => { data.exceededTransferLimit = true; }],
+  ["incorrect kind", (data) => { data.features[0].properties.data_kind = "official_model"; }],
+  ["incorrect scenario", (data) => { data.features[0].properties.scenario = "synthetic_demo_current"; }],
+  ["incorrect synthetic flag", (data) => { data.features[0].properties.synthetic = true; }],
   ["missing geometry", (data) => { data.features[0].geometry = null; }],
+  ["empty features", (data) => { data.features = []; }],
 ]) {
-  test(`future data with ${description} is rejected before reaching Leaflet`, async () => {
-    const badData = extent(sourceManifest().datasets[1]);
+  test(`planning layer with ${description} fails closed for display and address checks`, async () => {
+    const badData = extent(CATALOG[0]);
     mutate(badData);
-    const h = harness({ [FUTURE]: () => ok(badData) });
+    const h = harness({ [LEGACY_2100]: () => ok(badData) });
+    h.stubGeocoder([geocoded()]);
     await h.settle();
-    assert.equal(h.state("future_2100"), "failed");
-    assert.equal(h.official("future_2100"), undefined);
-    assert.equal(h.createdGeoJSON.some(({ options }) => options.pane === "officialFuture"), false);
-    assert.equal(h.state("baseline"), "loaded");
+    assert.equal(h.state("legacy_2100"), "failed");
+    assert.equal(h.createdGeoJSON.some(({ data }) => data.features.some((feature) => feature.properties?.scenario === "planning_overlay_union" && feature.id === "legacy_2100")), false);
+    await h.submit("Public test place Melbourne");
+    h.choose();
+    assert.equal(h.scenarioStatuses()[0].className, "scenario-status unavailable");
+    assert.equal(h.scenarioStatuses()[1].className, "scenario-status inside");
+    assert.equal(h.scenarioStatuses()[2].className, "scenario-status inside");
   });
 }
 
-test("a malformed JSON snapshot fails visibly rather than appearing as an empty valid layer", async () => {
-  const h = harness({ [BASELINE]: () => ({ ok: true, json: async () => { throw new SyntaxError("Bad JSON"); } }) });
+test("malformed prototype JSON fails visibly without being treated as an empty valid layer", async () => {
+  const h = harness({ [DEMO_CURRENT]: () => ({ ok: true, json: async () => { throw new SyntaxError("Bad JSON"); } }) });
   await h.settle();
-  assert.equal(h.state("baseline"), "failed");
-  assert.equal(h.official("baseline"), undefined);
-  assert.match(h.element("official-status").textContent, /Baseline \(blue fill\): failed to load/);
+  assert.equal(h.state("demo_current"), "failed");
+  assert.equal(h.element("retry-layer-data").hidden, false);
+  assert.match(h.element("layer-status").textContent, /Current day.*failed/);
 });
 
-test("overlapping retries while loading do not create duplicate requests or layers", async () => {
-  let release;
-  const pending = new Promise((resolve) => { release = resolve; });
-  const h = harness({ [MANIFEST]: () => pending });
+test("overlapping retries while a prototype layer is loading do not duplicate requests", async () => {
+  const pending = deferred();
+  const h = harness({ [LEGACY_2100]: () => pending.promise });
   await h.retry();
   await h.retry();
-  assert.equal(h.countRequests(MANIFEST), 1);
-  release(ok(h.manifest));
+  assert.equal(h.countRequests(LEGACY_2100), 1);
+  pending.resolve(ok(extent(CATALOG[0])));
   await h.settle();
-  assert.equal(h.countRequests(BASELINE), 1);
-  assert.equal(h.countRequests(FUTURE), 1);
-  assert.equal(h.evaluate("officialLayers.size"), 2);
+  for (const dataset of CATALOG) {
+    assert.equal(h.countRequests(dataset.file), 1);
+    assert.equal(h.state(dataset.id), "loaded");
+  }
 });
 
-test("official shown/hidden status follows layer control events", async () => {
+test("catalog order stays stable when prototype files respond in reverse order", async () => {
+  const pending = CATALOG.map(() => deferred());
+  const h = harness(Object.fromEntries(CATALOG.map((dataset, index) => [dataset.file, () => pending[index].promise])));
+  pending[2].resolve(ok(extent(CATALOG[2])));
+  await h.settle();
+  pending[1].resolve(ok(extent(CATALOG[1])));
+  await h.settle();
+  pending[0].resolve(ok(extent(CATALOG[0])));
+  await h.settle();
+  const names = h.control.overlays.filter(({ name }) => CATALOG.some((dataset) => dataset.label === name)).map(({ name }) => name);
+  assert.deepEqual(names, CATALOG.map(({ label }) => label));
+  h.stubGeocoder([geocoded()]);
+  await h.submit("Public test place Melbourne");
+  h.choose();
+  assert.deepEqual(h.element("address-scenarios").children.map((card) => card.querySelector("h4").textContent), CATALOG.map(({ label }) => label));
+});
+
+test("shown and hidden prototype status follows layer control events", async () => {
   const h = harness();
   await h.settle();
-  h.official("future_2100").addTo(h.map);
-  h.map.fire("overlayadd");
-  assert.match(h.element("official-status").textContent, /2100 scenario \(orange outline\): loaded · shown/);
-  h.map.removeLayer(h.official("baseline"));
+  h.map.removeLayer(h.layer("demo_2010"));
   h.map.fire("overlayremove");
-  assert.match(h.element("official-status").textContent, /Baseline \(blue fill\): loaded · hidden/);
+  assert.match(h.element("layer-status").textContent, /2010 flood event \(indicative\): loaded · hidden/);
+  h.layer("demo_2010").addTo(h.map);
+  h.map.fire("overlayadd");
+  assert.match(h.element("layer-status").textContent, /2010 flood event \(indicative\): loaded · shown/);
 });
 
-test("catchment failure retains a fallback map view and does not hide official data", async () => {
+test("catchment failure retains a fallback map view and does not hide prototype data", async () => {
   const h = harness({ "data/catchment.json": () => httpError() });
   await h.settle();
   assert.deepEqual(h.map.views[0], { center: [-37.811, 144.962], zoom: 15 });
   assert.equal(h.map.bounds, undefined);
-  assert.equal(h.state("baseline"), "loaded");
+  for (const { id } of CATALOG) assert.equal(h.state(id), "loaded");
   assert.equal(h.element("map-load-warning").hidden, false);
   assert.match(h.element("map-load-warning").textContent, /Elizabeth Street catchment/);
   assert.match(h.element("map-load-warning").textContent, /Missing data does not mean no flooding/);
 });
 
-test("historic-story failure is separate from successful official-layer loading", async () => {
+test("historic-story failure is separate from successful prototype loading", async () => {
   const h = harness({ "data/flood_stories.json": () => httpError() });
   await h.settle();
-  assert.equal(h.state("baseline"), "loaded");
-  assert.equal(h.state("future_2100"), "loaded");
+  for (const { id } of CATALOG) assert.equal(h.state(id), "loaded");
   assert.match(h.element("map-load-warning").textContent, /Historic flood stories/);
 });
 
-test("source panel retains each study date, scenario and local snapshot date", async () => {
+test("source explanations distinguish planning boundaries from synthetic demo data", async () => {
   const h = harness();
   await h.settle();
   const content = h.element("dataset-sources").textContent;
-  for (const expected of ["2020-08-13", "2017-08-31", "Existing Condition", "Yr 2100, RCP 8.5", "2026-10-08", "Not automatically updated"]) {
-    assert.ok(content.includes(expected), `Expected source explanation: ${expected}`);
-  }
+  for (const { label } of CATALOG) assert.ok(content.includes(label));
+  assert.match(content, /planning/i);
+  assert.match(content, /synthetic/i);
+  assert.doesNotMatch(content, /Official baseline|2017-08-31|2020-08-13/);
 });
 
-test("address submit requires explicit candidate selection before creating a pin and checking both models", async () => {
+test("address submit requires explicit selection before checking the same three displayed geometries", async () => {
   const h = harness();
   h.stubGeocoder([geocoded(), geocoded("Another public test place", 144.968, -37.807)]);
   await h.settle();
@@ -442,11 +448,19 @@ test("address submit requires explicit candidate selection before creating a pin
   assert.equal(h.map.hasLayer(h.markers[0]), true);
   assert.deepEqual(h.map.views.at(-1), { center: [-37.805, 144.965], zoom: 17 });
   assert.deepEqual(h.map.pans.at(-1), [195, 0]);
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status inside", "scenario-status inside"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), Array(3).fill("scenario-status inside"));
   const content = h.element("address-scenarios").textContent;
-  assert.match(content, /Intersecting source record: 100/);
-  assert.match(content, /Intersecting source records: 101, 102, 103/);
-  assert.match(h.element("address-snapshot").textContent, /2026-10-08/);
+  assert.match(content, /Planning boundaries · not a verified 2100 model/);
+  assert.match(content, /Synthetic demo · not observed\/modelled flooding/);
+  assert.match(h.element("address-snapshot").textContent, /all three prototype layers/);
+  for (const dataset of CATALOG) {
+    assert.equal(h.countRequests(dataset.file), 1);
+    const mapGeometry = h.layer(dataset.id).data;
+    const preparedResult = h.evaluate(`AddressLookup.lookupPoint([144.965, -37.805], prototypePrepared.get(${JSON.stringify(dataset.id)})).relation`);
+    assert.equal(preparedResult, "inside");
+    assert.equal(mapGeometry.features[0].properties.scenario, dataset.scenario);
+  }
+  assert.equal(h.requests.some((url) => url.startsWith("data/official/")), false);
   assert.equal(h.errors.length, 0);
 });
 
@@ -462,47 +476,48 @@ test("an empty geocoder response leaves no selected point or model result", asyn
   assert.equal(h.scenarioStatuses().length, 0);
 });
 
-test("address model-data retry refreshes the selected result without a new search or duplicate pin", async () => {
-  const h = harness({ [FUTURE]: () => httpError() });
+test("address layer-data retry refreshes the selected result without a new search or duplicate pin", async () => {
+  const h = harness({ [DEMO_2010]: () => httpError() });
   h.stubGeocoder([geocoded()]);
   await h.settle();
   await h.submit("Public test place Melbourne");
   h.choose();
   const pin = h.markers[0];
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status inside", "scenario-status unavailable"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status inside", "scenario-status unavailable", "scenario-status inside"]);
   assert.equal(h.element("address-retry-data").hidden, false);
 
-  h.routes.set(FUTURE, () => ok(extent(h.manifest.datasets[1])));
+  h.routes.set(DEMO_2010, () => ok(extent(CATALOG[1])));
   h.element("address-retry-data").dispatch("click");
   await h.settle();
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status inside", "scenario-status inside"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), Array(3).fill("scenario-status inside"));
   assert.equal(h.element("address-retry-data").hidden, true);
-  assert.equal(h.countRequests(BASELINE), 1);
-  assert.equal(h.countRequests(FUTURE), 2);
+  assert.equal(h.countRequests(LEGACY_2100), 1);
+  assert.equal(h.countRequests(DEMO_2010), 2);
+  assert.equal(h.countRequests(DEMO_CURRENT), 1);
   assert.equal(h.geocoderRequests().length, 1);
   assert.equal(h.markers.length, 1);
   assert.equal(h.map.hasLayer(pin), true);
-  assert.equal(h.map.hasLayer(h.official("future_2100")), false);
+  assert.equal(h.map.hasLayer(h.layer("demo_2010")), true);
 });
 
-test("a selected point updates automatically when pending model data finishes loading", async () => {
-  const baseline = deferred();
-  const h = harness({ [BASELINE]: () => baseline.promise });
+test("a selected point updates automatically when pending prototype data finishes loading", async () => {
+  const planning = deferred();
+  const h = harness({ [LEGACY_2100]: () => planning.promise });
   h.stubGeocoder([geocoded()]);
   await h.settle();
   await h.submit("Public test place Melbourne");
   h.choose();
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status loading", "scenario-status inside"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status loading", "scenario-status inside", "scenario-status inside"]);
   assert.equal(h.element("address-retry-data").hidden, true);
-  baseline.resolve(ok(extent(h.manifest.datasets[0])));
+  planning.resolve(ok(extent(CATALOG[0])));
   await h.settle();
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status inside", "scenario-status inside"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), Array(3).fill("scenario-status inside"));
   assert.equal(h.geocoderRequests().length, 1);
   assert.equal(h.markers.length, 1);
 });
 
-test("outside the project catchment is a separate warning, not an automatic outside-model result", async () => {
-  const catchment = extent(sourceManifest().datasets[0], [144.96, -37.81, 144.963, -37.80]);
+test("outside the project catchment is a separate warning, not an automatic outside-layer result", async () => {
+  const catchment = extent({ ...CATALOG[0], id: "catchment" }, [144.96, -37.81, 144.963, -37.80]);
   const h = harness({ "data/catchment.json": () => ok(catchment) });
   h.stubGeocoder([geocoded()]);
   await h.settle();
@@ -511,47 +526,48 @@ test("outside the project catchment is a separate warning, not an automatic outs
   assert.match(h.element("address-catchment").textContent, /Outside the Elizabeth Street project catchment/);
   assert.match(h.element("address-catchment").textContent, /not flood information for all of Melbourne/);
   assert.equal(h.element("address-catchment").className, "scope-warning");
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status inside", "scenario-status inside"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), Array(3).fill("scenario-status inside"));
 });
 
-test("outside model extents within the catchment does not claim safety or official assessment coverage", async () => {
-  const datasets = sourceManifest().datasets;
+test("outside prototype extents within the catchment does not claim safety or official assessment coverage", async () => {
   const smallerBounds = [144.96, -37.81, 144.963, -37.80];
   const h = harness({
-    [BASELINE]: () => ok(extent(datasets[0], smallerBounds)),
-    [FUTURE]: () => ok(extent(datasets[1], smallerBounds)),
+    [LEGACY_2100]: () => ok(extent(CATALOG[0], smallerBounds)),
+    [DEMO_2010]: () => ok(extent(CATALOG[1], smallerBounds)),
+    [DEMO_CURRENT]: () => ok(extent(CATALOG[2], smallerBounds)),
   });
   h.stubGeocoder([geocoded()]);
   await h.settle();
   await h.submit("Public test place Melbourne");
   h.choose();
   assert.match(h.element("address-catchment").textContent, /Within the Elizabeth Street project catchment/);
-  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), ["scenario-status outside", "scenario-status outside"]);
+  assert.deepEqual(h.scenarioStatuses().map((node) => node.className), Array(3).fill("scenario-status outside"));
   for (const card of h.element("address-scenarios").children) {
-    assert.match(card.textContent, /does not confirm the location was assessed or is safe/);
-    assert.match(card.textContent, /do not have the model-study coverage boundary/);
+    assert.match(card.textContent, /does not establish assessment coverage or confirm that the location is safe/);
   }
 });
 
-test("a hidden future scenario is assessed and can be shown without changing the result", async () => {
+test("a hidden prototype layer is checked and can be shown without changing the result", async () => {
   const h = harness();
   h.stubGeocoder([geocoded()]);
   await h.settle();
-  assert.equal(h.map.hasLayer(h.official("future_2100")), false);
+  h.map.removeLayer(h.layer("demo_2010"));
+  h.map.fire("overlayremove");
+  assert.equal(h.map.hasLayer(h.layer("demo_2010")), false);
   await h.submit("Public test place Melbourne");
   h.choose();
   const futureCard = h.element("address-scenarios").children[1];
   assert.equal(futureCard.querySelector(".scenario-status").className, "scenario-status inside");
-  assert.match(futureCard.textContent, /2017-08-31/);
-  assert.match(futureCard.textContent, /Yr 2100, RCP 8.5/);
+  assert.match(futureCard.textContent, /2010 flood event \(indicative\)/);
+  assert.match(futureCard.textContent, /Synthetic demo/);
   assert.equal(futureCard.querySelector("button").textContent, "Show layer on map");
   futureCard.querySelector("button").dispatch("click");
-  assert.equal(h.map.hasLayer(h.official("future_2100")), true);
+  assert.equal(h.map.hasLayer(h.layer("demo_2010")), true);
   const refreshed = h.element("address-scenarios").children[1];
   assert.equal(refreshed.querySelector(".scenario-status").className, "scenario-status inside");
   assert.equal(refreshed.querySelector("button").textContent, "Layer shown on map");
   assert.equal(refreshed.querySelector("button").disabled, true);
-  assert.equal(h.countRequests(FUTURE), 1);
+  assert.equal(h.countRequests(DEMO_2010), 1);
   assert.equal(h.geocoderRequests().length, 1);
 });
 
@@ -651,7 +667,7 @@ for (const [description, response] of [
     assert.equal(h.element("address-panel").getAttribute("aria-busy"), "false");
     assert.equal(h.element("address-selection").hidden, true);
     assert.equal(h.markers.length, 0);
-    assert.equal(h.state("baseline"), "loaded");
+    assert.equal(h.state("legacy_2100"), "loaded");
   });
 }
 

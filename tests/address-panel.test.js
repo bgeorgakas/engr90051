@@ -6,7 +6,8 @@ const assert = require("node:assert/strict");
 const { create } = require("../js/address-panel.js");
 const { prepareCollection, lookupPoint } = require("../js/address-lookup.js");
 
-const SOURCE = "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11";
+const DATA_FILES = ["data/flood_extent_2100.json", "data/flood_extent_2010.json", "data/flood_extent_current.json"];
+const LAYER_LABELS = ["2100 — 1% AEP (climate change)", "2010 flood event (indicative)", "Current day — 1% AEP (indicative)"];
 
 class BasicElement {
   constructor(tagName, document) {
@@ -72,15 +73,18 @@ function dataContext() {
     catchment: { state: "loaded", prepared: prepared([square(-20, -20, 40)]) },
     datasets: [
       {
-        id: "baseline", state: "loaded", prepared: prepared(), visible: true,
-        metadata: { label: "Baseline · 1% AEP · 2020 study", study_date: "2020-08-13", modelling_scenario: "Existing Condition", records_url: `${SOURCE}/query?where=OBJECTID%3D1` },
+        id: "legacy_2100", state: "loaded", prepared: prepared(), visible: true,
+        metadata: { id: "legacy_2100", label: LAYER_LABELS[0], data_kind: "planning_overlay", description: "Planning boundary geometry, not a verified future model.", file: DATA_FILES[0], source_url: "https://example.test/planning-source" },
       },
       {
-        id: "future_2100", state: "loaded", prepared: prepared([square(2, 2, 10)], 2), visible: false,
-        metadata: { label: "2100 RCP 8.5 · 1% AEP · 2017 study", study_date: "2017-08-31", modelling_scenario: "Yr 2100, RCP 8.5", records_url: `${SOURCE}/query?where=OBJECTID%3D2` },
+        id: "demo_2010", state: "loaded", prepared: prepared([square(2, 2, 10)], 2), visible: false,
+        metadata: { id: "demo_2010", label: LAYER_LABELS[1], data_kind: "synthetic_demo", description: "Synthetic demonstration, not an observed flood event.", file: DATA_FILES[1], source_url: "scripts/transform.py" },
+      },
+      {
+        id: "demo_current", state: "loaded", prepared: prepared([square(4, 4, 10)], 3), visible: false,
+        metadata: { id: "demo_current", label: LAYER_LABELS[2], data_kind: "synthetic_demo", description: "Synthetic demonstration, not a modelled flood event.", file: DATA_FILES[2], source_url: "scripts/transform.py" },
       },
     ],
-    retrievedAt: "2026-10-08T02:15:01Z",
   };
 }
 
@@ -161,7 +165,7 @@ test("a search requires explicit candidate choice even for one result", async ()
   assert.equal(h.node("address-selection").hidden, false);
   assert.equal(h.node("selected-address").textContent, result.label);
   assert.equal(h.document.activeElement, h.node("selected-address"));
-  assert.equal(h.node("address-scenarios").children.length, 2);
+  assert.equal(h.node("address-scenarios").children.length, 3);
 });
 
 test("loading state announces activity and prevents premature results", async () => {
@@ -195,7 +199,7 @@ for (const [code, pattern] of [
   ["INVALID_QUERY", /between 3 and 200 characters/],
   ["NETWORK", /unavailable.*no flood result has been calculated/],
 ]) {
-  test(`search ${code} error remains separate from model results`, async () => {
+  test(`search ${code} error remains separate from geometry results`, async () => {
     const h = harness({ search: async () => { throw Object.assign(new Error("raw error <img>"), { code }); } });
     await h.search();
     assert.match(h.node("address-search-status").textContent, pattern);
@@ -322,7 +326,7 @@ test("candidate labels, kinds, metadata and selected address use literal text", 
   const hostileText = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
   const context = dataContext();
   context.datasets[0].metadata.label = hostileText;
-  context.datasets[0].metadata.modelling_scenario = hostileText;
+  context.datasets[0].metadata.description = hostileText;
   const h = harness({ context, results: [candidate({ label: hostileText, kind: hostileText })] });
   await h.search();
   assert.ok(h.node("address-candidate-list").textContent.includes(hostileText));
@@ -335,32 +339,35 @@ test("candidate labels, kinds, metadata and selected address use literal text", 
   assert.equal(h.card(0).querySelectorAll("script").length, 0);
 });
 
-test("both scenarios independently report inside, boundary or outside", async () => {
-  for (const [point, baseline, future] of [
-    [[1, 1], "inside", "outside"],
-    [[2, 5], "inside", "boundary"],
-    [[0, 5], "boundary", "outside"],
-    [[11, 5], "outside", "inside"],
-    [[15, 15], "outside", "outside"],
+test("all three prototype layers independently report inside, boundary or outside", async () => {
+  for (const [point, planning, demo2010, current] of [
+    [[1, 1], "inside", "outside", "outside"],
+    [[2, 5], "inside", "boundary", "outside"],
+    [[0, 5], "boundary", "outside", "outside"],
+    [[11, 5], "outside", "inside", "inside"],
+    [[4, 5], "inside", "inside", "boundary"],
+    [[13, 5], "outside", "outside", "inside"],
+    [[15, 15], "outside", "outside", "outside"],
   ]) {
     const h = harness({ results: [candidate({ lon: point[0], lat: point[1] })] });
     await h.search();
     h.choose();
-    assert.equal(h.card(0).querySelector(".scenario-status").classList.contains(baseline), true);
-    assert.equal(h.card(1).querySelector(".scenario-status").classList.contains(future), true);
+    assert.equal(h.card(0).querySelector(".scenario-status").classList.contains(planning), true);
+    assert.equal(h.card(1).querySelector(".scenario-status").classList.contains(demo2010), true);
+    assert.equal(h.card(2).querySelector(".scenario-status").classList.contains(current), true);
   }
 });
 
-test("inside and boundary descriptions are qualified, and matching record IDs are visible", async () => {
+test("inside and boundary descriptions are geometry-only and never expose official source records", async () => {
   const h = harness({ results: [candidate({ lon: 2, lat: 5 })] });
   await h.search();
   h.choose();
-  assert.match(h.card(0).textContent, /Within modelled extent/);
-  assert.match(h.card(0).textContent, /not a forecast or a property-level risk assessment/);
-  assert.match(h.card(0).textContent, /Intersecting source record: 1/);
-  assert.match(h.card(1).textContent, /On model boundary/);
+  assert.match(h.card(0).textContent, /Within displayed area/);
+  assert.match(h.card(0).textContent, /not a flood-risk, property, or climate-change assessment/);
+  assert.doesNotMatch(h.node("address-scenarios").textContent, /Intersecting source record|Melbourne Water · study/);
+  assert.match(h.card(1).textContent, /On displayed boundary/);
   assert.match(h.card(1).textContent, /small change in the pin location/);
-  assert.match(h.card(1).textContent, /Intersecting source record: 2/);
+  assert.match(h.card(1).textContent, /geometry-only check, not a flood-risk assessment/);
   assert.match(h.node("selected-coordinate").textContent, /5\.00000, 2\.00000 \(latitude, longitude\)/);
 });
 
@@ -370,9 +377,9 @@ test("a polygon hole reports no intersection without claiming safety or known co
   const h = harness({ context, results: [candidate({ lon: 3, lat: 3 })] });
   await h.search();
   h.choose();
-  assert.match(h.card(0).textContent, /Not within displayed extent/);
-  assert.match(h.card(0).textContent, /do not have the model-study coverage boundary/);
-  assert.match(h.card(0).textContent, /does not confirm the location was assessed or is safe/);
+  assert.match(h.card(0).textContent, /Not within displayed area/);
+  assert.match(h.card(0).textContent, /does not establish assessment coverage/);
+  assert.match(h.card(0).textContent, /or confirm that the location is safe/);
   assert.match(h.node("address-catchment").textContent, /Within.*project catchment.*does not establish model-study coverage/);
 });
 
@@ -385,8 +392,8 @@ test("outside project catchment is a separate warning and does not suppress scen
   assert.match(h.node("address-catchment").textContent, /Outside.*project catchment/);
   assert.match(h.node("address-catchment").textContent, /not flood information for all of Melbourne/);
   assert.equal(h.node("address-catchment").className, "scope-warning");
-  assert.match(h.card(0).textContent, /Within modelled extent/);
-  assert.match(h.card(1).textContent, /Within modelled extent/);
+  assert.match(h.card(0).textContent, /Within displayed area/);
+  assert.match(h.card(1).textContent, /Within displayed area/);
 });
 
 test("catchment boundary is explicitly not a model-study coverage boundary", async () => {
@@ -412,38 +419,38 @@ test("loading, absent and invalid catchment data do not invent coverage", async 
     await h.search();
     h.choose();
     assert.match(h.node("address-catchment").textContent, pattern);
-    assert.match(h.card(0).textContent, /Within modelled extent/);
+    assert.match(h.card(0).textContent, /Within displayed area/);
   }
 });
 
-test("missing and invalid model states show unavailable, not outside", async () => {
-  for (const dataset of [undefined, { id: "baseline", state: "failed" }, { id: "baseline", state: "loaded" }, { id: "baseline", state: "loaded", prepared: {} }]) {
+test("missing and invalid layer states show unavailable, not outside", async () => {
+  for (const dataset of [undefined, { id: "legacy_2100", state: "failed" }, { id: "legacy_2100", state: "loaded" }, { id: "legacy_2100", state: "loaded", prepared: {} }]) {
     const context = dataContext();
-    context.datasets = [context.datasets[1], ...(dataset ? [dataset] : [])];
+    context.datasets = [context.datasets[1], context.datasets[2], ...(dataset ? [dataset] : [])];
     const h = harness({ context });
     await h.search();
     h.choose();
-    assert.match(h.card(0).textContent, /Model data unavailable/);
+    assert.match(h.card(0).textContent, /Layer data unavailable/);
     assert.match(h.card(0).textContent, /Missing or invalid data does not mean there is no flood risk/);
-    assert.doesNotMatch(h.card(0).textContent, /Not within displayed extent/);
+    assert.doesNotMatch(h.card(0).textContent, /Not within displayed area/);
     assert.equal(h.node("address-retry-data").hidden, false);
-    assert.match(h.card(1).textContent, /Within modelled extent/);
+    assert.match(h.card(1).textContent, /Within displayed area/);
   }
 });
 
-test("loading model results refresh after preparation without another address search", async () => {
+test("loading layer results refresh after preparation without another address search", async () => {
   const context = dataContext();
   context.datasets[0].state = "loading";
   context.datasets[0].prepared = undefined;
   const h = harness({ context });
   await h.search();
   h.choose();
-  assert.match(h.card(0).textContent, /Waiting for model data/);
+  assert.match(h.card(0).textContent, /Waiting for layer data/);
   assert.equal(h.node("address-retry-data").hidden, true);
   context.datasets[0].state = "loaded";
   context.datasets[0].prepared = prepared();
   h.controller.refresh();
-  assert.match(h.card(0).textContent, /Within modelled extent/);
+  assert.match(h.card(0).textContent, /Within displayed area/);
   assert.equal(h.calls.search.length, 1);
   assert.equal(h.calls.selected.length, 1);
 });
@@ -455,72 +462,83 @@ test("retry delegates loading and refresh replaces unavailable results", async (
   const h = harness({ context });
   await h.search();
   h.choose();
-  assert.match(h.card(1).textContent, /Model data unavailable/);
+  assert.match(h.card(1).textContent, /Layer data unavailable/);
   h.node("address-retry-data").click();
   assert.equal(h.calls.retry, 1);
   context.datasets[1].state = "loading";
   h.controller.refresh();
-  assert.match(h.card(1).textContent, /Waiting for model data/);
+  assert.match(h.card(1).textContent, /Waiting for layer data/);
   context.datasets[1].state = "loaded";
   context.datasets[1].prepared = prepared([square(2, 2, 10)], 2);
   h.controller.refresh();
-  assert.match(h.card(1).textContent, /Within modelled extent/);
+  assert.match(h.card(1).textContent, /Within displayed area/);
   assert.equal(h.node("address-retry-data").hidden, true);
   assert.equal(h.calls.search.length, 1);
 });
 
-test("both official scenarios are checked when hidden and legacy data is ignored", async () => {
+test("all three prototype layers are checked when hidden and official or unrelated data is ignored", async () => {
   const context = dataContext();
   for (const dataset of context.datasets) dataset.visible = false;
-  context.datasets.push({
-    id: "synthetic_legacy", state: "loaded", visible: true,
-    get prepared() { throw new Error("Legacy geometry must not be read"); },
-  });
+  for (const id of ["baseline", "future_2100", "unrelated_layer"]) {
+    context.datasets.push({
+      id, state: "loaded", visible: true,
+      get prepared() { throw new Error("Official or unrelated geometry must not be read"); },
+      get metadata() { throw new Error("Official or unrelated metadata must not be read"); },
+    });
+  }
   const h = harness({ context });
   await h.search();
   h.choose();
-  assert.equal(h.node("address-scenarios").children.length, 2);
-  assert.match(h.card(0).textContent, /Within modelled extent/);
-  assert.match(h.card(1).textContent, /Within modelled extent/);
-  assert.match(h.node("address-snapshot").textContent, /2026-10-08 \(UTC\)/);
-  assert.match(h.node("address-snapshot").textContent, /both official scenarios even when a layer is hidden/);
-  assert.match(h.node("address-snapshot").textContent, /planning and synthetic demo layers are not used/);
+  assert.equal(h.node("address-scenarios").children.length, 3);
+  for (let index = 0; index < 3; index += 1) assert.match(h.card(index).textContent, /Within displayed area/);
+  assert.match(h.node("address-snapshot").textContent, /all three prototype layers, even when hidden/);
+  assert.match(h.node("address-snapshot").textContent, /geometry-only results, not evidence of flooding, safety, or climate-change effects/);
+  assert.doesNotMatch(h.node("address-scenarios").textContent, /Baseline|RCP 8\.5|Official source/);
 });
 
-test("missing snapshot date uses a qualified official-only statement", async () => {
+test("the geometry-only summary does not read obsolete snapshot dates or model metadata", async () => {
   const context = dataContext();
-  delete context.retrievedAt;
+  Object.defineProperty(context, "retrievedAt", { get() { throw new Error("No official snapshot dates"); } });
+  for (const dataset of context.datasets) {
+    for (const key of ["study_date", "modelling_scenario", "records_url"]) {
+      Object.defineProperty(dataset.metadata, key, { get() { throw new Error("No official model metadata"); } });
+    }
+  }
   const h = harness({ context });
   await h.search();
   h.choose();
-  assert.equal(h.node("address-snapshot").textContent, "Results use the official model snapshots only, not planning or synthetic demo layers.");
+  assert.equal(h.node("address-snapshot").textContent, "One approximate mapped point is checked against all three prototype layers, even when hidden. These are geometry-only results, not evidence of flooding, safety, or climate-change effects.");
 });
 
-test("source links allow only the verified official query endpoint", async () => {
-  for (const recordsURL of [
+test("source links use only exact local layer paths and transformation script provenance", async () => {
+  for (const untrustedPath of [
     "javascript:alert(1)",
     "https://untrusted.example/query",
-    "https://spatial.planning.vic.gov.au.evil.example/server/rest/services/planning_flood_control/MapServer/11/query",
-    `${SOURCE}/unverified`,
-    `${SOURCE}/query/extra`,
-    "http://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query",
-    "not a URL",
+    "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query",
+    "data/official/flood_extent_baseline.geojson",
+    "data/../unverified.json",
+    "data/flood_extent_2100.json?redirect=evil",
+    "data/flood_extent_2100.json#untrusted",
+    "//untrusted.example/data/flood_extent_2100.json",
     undefined,
   ]) {
     const context = dataContext();
-    context.datasets[0].metadata.records_url = recordsURL;
+    context.datasets[0].metadata.file = untrustedPath;
+    context.datasets[0].metadata.source_url = untrustedPath;
     const h = harness({ context });
     await h.search();
     h.choose();
-    const link = h.card(0).querySelector("a");
-    assert.equal(link.href, SOURCE);
-    assert.equal(link.target, "_blank");
-    assert.equal(link.rel, "noopener noreferrer");
+    for (let index = 0; index < 3; index += 1) {
+      const links = h.card(index).querySelectorAll("a");
+      assert.deepEqual(links.map((link) => link.href), [DATA_FILES[index], "scripts/transform.py"]);
+      assert.equal(links[0].textContent, "Displayed layer data");
+      assert.equal(links[1].textContent, "How this layer was made");
+      for (const link of links) {
+        assert.equal(link.target, "_blank");
+        assert.equal(link.rel, "noopener noreferrer");
+      }
+    }
   }
-  const h = harness();
-  await h.search();
-  h.choose();
-  assert.equal(h.card(0).querySelector("a").href, `${SOURCE}/query?where=OBJECTID%3D1`);
 });
 
 test("choosing another candidate clears prior selection and restores candidate focus", async () => {
@@ -538,8 +556,8 @@ test("choosing another candidate clears prior selection and restores candidate f
   h.choose(1);
   assert.deepEqual(h.calls.selected, [first, second]);
   assert.equal(h.node("selected-address").textContent, "Second result");
-  assert.match(h.card(0).textContent, /Not within displayed extent/);
-  assert.match(h.card(1).textContent, /Within modelled extent/);
+  assert.match(h.card(0).textContent, /Not within displayed area/);
+  assert.match(h.card(1).textContent, /Within displayed area/);
 });
 
 test("recenter and show-layer actions call map callbacks for the correct selection/scenario", async () => {
@@ -560,9 +578,12 @@ test("recenter and show-layer actions call map callbacks for the correct selecti
   assert.equal(hidden.disabled, false);
   assert.equal(hidden.textContent, "Show layer on map");
   hidden.click();
-  assert.deepEqual(h.calls.showLayer, ["future_2100"]);
+  assert.deepEqual(h.calls.showLayer, ["demo_2010"]);
   assert.equal(h.card(1).querySelector("button").disabled, true);
-  assert.match(h.card(1).textContent, /Within modelled extent/);
+  assert.match(h.card(1).textContent, /Within displayed area/);
+  h.card(2).querySelector("button").click();
+  assert.deepEqual(h.calls.showLayer, ["demo_2010", "demo_current"]);
+  assert.equal(h.card(2).querySelector("button").disabled, true);
 });
 
 test("a new search clears old selection and map pin before results arrive", async () => {
@@ -590,7 +611,7 @@ test("road and city candidates warn that the match is street/area-level, not a p
     assert.match(h.node("address-precision-note").textContent, /Street\/area-level match, not a specific property/);
     assert.match(h.node("address-precision-note").textContent, /Try a numbered address/);
     assert.match(h.node("address-precision-note").textContent, /verify the pin/);
-    assert.match(h.card(0).textContent, /Within modelled extent/);
+    assert.match(h.card(0).textContent, /Within displayed area/);
   }
 });
 
@@ -651,29 +672,29 @@ test("scenario explanation details preserve their independent open state across 
   assert.equal(h.card(1).querySelector("details").open, true);
 });
 
-test("an invalid prepared model handle cannot offer a show-layer action", async () => {
+test("an invalid prepared layer handle cannot offer a show-layer action", async () => {
   const context = dataContext();
   context.datasets[0].prepared = {};
   context.datasets[0].visible = false;
   const h = harness({ context });
   await h.search();
   h.choose();
-  assert.match(h.card(0).textContent, /Model data unavailable/);
+  assert.match(h.card(0).textContent, /Layer data unavailable/);
   assert.equal(h.card(0).querySelector("button"), null);
   assert.doesNotMatch(h.card(0).textContent, /Show layer on map|Layer shown on map/);
   assert.equal(h.node("address-retry-data").hidden, false);
   assert.equal(h.card(1).querySelector("button").textContent, "Show layer on map");
 });
 
-test("official-origin source links with embedded credentials fall back to the verified source", async () => {
+test("source URLs with embedded credentials cannot replace local data links", async () => {
   for (const credentials of ["username:password", "username", ":password", "user%3Aname:pass%40word"]) {
     const context = dataContext();
-    context.datasets[0].metadata.records_url = SOURCE.replace("https://", `https://${credentials}@`) + "/query?where=OBJECTID%3D1";
+    context.datasets[0].metadata.source_url = `https://${credentials}@spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11/query`;
     const h = harness({ context });
     await h.search();
     h.choose();
     const link = h.card(0).querySelector("a");
-    assert.equal(link.href, SOURCE);
+    assert.equal(link.href, DATA_FILES[0]);
     assert.equal(link.target, "_blank");
     assert.equal(link.rel, "noopener noreferrer");
   }
@@ -724,5 +745,52 @@ test("refresh alone preserves the user's current panel scroll position", async (
   h.controller.refresh();
   assert.equal(h.node("address-panel").scrollTop, 275);
   assert.equal(h.document.activeElement, activeElement);
-  assert.match(h.card(0).textContent, /Within modelled extent/);
+  assert.match(h.card(0).textContent, /Within displayed area/);
+});
+
+test("exact original layer titles and result order are stable even when dataset input is reversed", async () => {
+  const context = dataContext();
+  context.datasets.reverse();
+  const h = harness({ context });
+  await h.search();
+  h.choose();
+  assert.deepEqual(h.node("address-scenarios").children.map((card) => card.querySelector("h4").textContent), LAYER_LABELS);
+  for (const dataset of context.datasets) delete dataset.metadata;
+  h.controller.refresh();
+  assert.deepEqual(h.node("address-scenarios").children.map((card) => card.querySelector("h4").textContent), LAYER_LABELS);
+});
+
+test("planning and synthetic provenance warnings remain visible outside collapsed explanations", async () => {
+  const h = harness();
+  await h.search();
+  h.choose();
+  for (let index = 0; index < 3; index += 1) {
+    const card = h.card(index);
+    const badge = card.querySelector(".scenario-data-kind");
+    const details = card.querySelector("details");
+    assert.equal(details.open, false);
+    assert.equal(card.children.includes(badge), true);
+    assert.equal(badge.hidden, false);
+    assert.equal(details.querySelector(".scenario-data-kind"), null);
+    assert.equal(badge.textContent, index === 0
+      ? "Planning boundaries · not a verified 2100 model"
+      : "Synthetic demo · not observed/modelled flooding");
+    assert.match(details.textContent, index === 0 ? /not a verified 2100 climate-change flood model/ : /not observations of an actual flood event or outputs of a flood model/);
+  }
+});
+
+test("provenance badges remain visible for missing or loading prototype layers", async () => {
+  const context = dataContext();
+  context.datasets = [{ id: "demo_2010", state: "loading" }];
+  const h = harness({ context });
+  await h.search();
+  h.choose();
+  assert.match(h.card(0).textContent, /Layer data unavailable/);
+  assert.match(h.card(1).textContent, /Waiting for layer data/);
+  assert.match(h.card(2).textContent, /Layer data unavailable/);
+  for (let index = 0; index < 3; index += 1) {
+    const badge = h.card(index).querySelector(".scenario-data-kind");
+    assert.equal(h.card(index).children.includes(badge), true);
+    assert.equal(badge.hidden, false);
+  }
 });

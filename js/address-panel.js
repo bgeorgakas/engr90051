@@ -1,10 +1,28 @@
-/* Address lookup UI. Geometry checks use local model snapshots only. */
+/* Address lookup UI. Geometry-only checks against the three prototype layers. */
 (function (root) {
   "use strict";
-  const SOURCE = "https://spatial.planning.vic.gov.au/server/rest/services/planning_flood_control/MapServer/11";
-  const FALLBACK_LABELS = {
-    baseline: "Baseline · 1% AEP · 2020 study",
-    future_2100: "2100 RCP 8.5 · 1% AEP · 2017 study",
+  const LAYERS = {
+    legacy_2100: {
+      label: "2100 — 1% AEP (climate change)",
+      file: "data/flood_extent_2100.json",
+      badge: "Planning boundaries · not a verified 2100 model",
+      explanation: "These are planning flood-control boundaries reused under the original prototype title, not a verified 2100 climate-change flood model. The geometry does not establish the title’s date or AEP.",
+      kind: "planning_overlay",
+    },
+    demo_2010: {
+      label: "2010 flood event (indicative)",
+      file: "data/flood_extent_2010.json",
+      badge: "Synthetic demo · not observed/modelled flooding",
+      explanation: "This is illustrative synthetic demo geometry, not observations of an actual flood event or outputs of a flood model. The title’s date and any AEP are not verified by these polygons.",
+      kind: "synthetic_demo",
+    },
+    demo_current: {
+      label: "Current day — 1% AEP (indicative)",
+      file: "data/flood_extent_current.json",
+      badge: "Synthetic demo · not observed/modelled flooding",
+      explanation: "This is illustrative synthetic demo geometry, not observations of an actual flood event or outputs of a flood model. The title’s date and any AEP are not verified by these polygons.",
+      kind: "synthetic_demo",
+    },
   };
 
   function create(options) {
@@ -65,14 +83,8 @@
       input.focus();
     }
 
-    function sourceLink(metadata) {
-      const link = element("a", "Official source ↗");
-      let href = SOURCE;
-      try {
-        const url = new URL(metadata?.records_url || SOURCE);
-        const source = new URL(SOURCE);
-        if (url.origin === source.origin && url.pathname === source.pathname + "/query" && !url.username && !url.password) href = url.href;
-      } catch (_) { /* Fall back to the verified source URL. */ }
+    function localLink(text, href) {
+      const link = element("a", text);
       link.href = href;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
@@ -112,26 +124,27 @@
 
       scenarios.replaceChildren();
       let hasFailedData = false;
-      for (const id of ["baseline", "future_2100"]) {
+      for (const id of Object.keys(LAYERS)) {
+        const layer = LAYERS[id];
         const dataset = context.datasets.find((entry) => entry.id === id) || { id, state: "failed" };
         const metadata = dataset.metadata;
         const card = element("section", undefined, "scenario-card");
-        card.appendChild(element("h4", metadata?.label || FALLBACK_LABELS[id]));
+        card.appendChild(element("h4", metadata?.label || layer.label));
+        // Keep provenance visible even while explanation details are collapsed.
+        card.appendChild(element("p", layer.badge, `scenario-data-kind ${layer.kind}`));
         let relation = dataset.state === "loading" ? "loading" : "unavailable";
-        let featureIds = [];
         if (dataset.state === "loaded" && dataset.prepared) {
           try {
             const result = lookup(point, dataset.prepared);
             relation = result.relation;
-            featureIds = result.featureIds;
           } catch (_) { relation = "unavailable"; }
         }
         const messages = {
-          inside: ["Within modelled extent", "The selected point intersects this scenario’s flood polygon. This is not a forecast or a property-level risk assessment."],
-          boundary: ["On model boundary", "The selected point is on a polygon edge. A small change in the pin location could change the result; verify the location carefully."],
-          outside: ["Not within displayed extent", "No intersection with this snapshot. We do not have the model-study coverage boundary, so this does not confirm the location was assessed or is safe."],
-          unavailable: ["Model data unavailable", "No comparison could be made. Missing or invalid data does not mean there is no flood risk."],
-          loading: ["Waiting for model data", "This result will update when the official snapshot finishes loading."],
+          inside: ["Within displayed area", "The approximate mapped point is inside this displayed geometry only. This is not a flood-risk, property, or climate-change assessment."],
+          boundary: ["On displayed boundary", "The approximate mapped point is on this displayed geometry’s edge. A small change in the pin location could change the result; verify the location carefully. This is a geometry-only check, not a flood-risk assessment."],
+          outside: ["Not within displayed area", "No intersection with this displayed geometry. This does not establish assessment coverage or confirm that the location is safe."],
+          unavailable: ["Layer data unavailable", "No geometry check could be made. Missing or invalid data does not mean there is no flood risk."],
+          loading: ["Waiting for layer data", "This result will update when this prototype layer finishes loading."],
         };
         if (!messages[relation]) relation = "unavailable";
         const [heading, description] = messages[relation];
@@ -144,13 +157,13 @@
         });
         details.appendChild(element("summary", "Explanation & source"));
         details.appendChild(element("p", description, "scenario-description"));
-        if (metadata) {
-          details.appendChild(element("p", `Melbourne Water · study ${metadata.study_date} · ${metadata.modelling_scenario}`, "scenario-metadata"));
+        details.appendChild(element("p", layer.explanation, "scenario-metadata"));
+        if (metadata?.description) {
+          details.appendChild(element("p", metadata.description, "scenario-metadata"));
         }
-        if (featureIds.length) {
-          details.appendChild(element("p", `Intersecting source record${featureIds.length === 1 ? "" : "s"}: ${featureIds.join(", ")}`, "scenario-metadata"));
-        }
-        details.appendChild(sourceLink(metadata));
+        // Use exact local allowlisted paths, never metadata URLs or official-model links.
+        details.appendChild(localLink("Displayed layer data", layer.file));
+        details.appendChild(localLink("How this layer was made", "scripts/transform.py"));
         card.appendChild(details);
         const actions = element("div", undefined, "scenario-actions");
         if (["inside", "boundary", "outside"].includes(relation)) {
@@ -165,16 +178,14 @@
         if (relation === "unavailable") hasFailedData = true;
       }
       node("address-retry-data").hidden = !hasFailedData;
-      node("address-snapshot").textContent = context.retrievedAt
-        ? `Snapshot retrieved ${context.retrievedAt.slice(0, 10)} (UTC). Results use both official scenarios even when a layer is hidden; planning and synthetic demo layers are not used.`
-        : "Results use the official model snapshots only, not planning or synthetic demo layers.";
+      node("address-snapshot").textContent = "One approximate mapped point is checked against all three prototype layers, even when hidden. These are geometry-only results, not evidence of flooding, safety, or climate-change effects.";
     }
 
     function select(result) {
       selection = result;
       candidatesNode.hidden = true;
       selectionNode.hidden = false;
-      status.textContent = "Location selected. Comparing the mapped point with both official scenarios.";
+      status.textContent = "Location selected. Checking one approximate mapped point against the three prototype layers.";
       refresh();
       options.onSelect?.(result);
       node("selected-address").focus({ preventScroll: true });

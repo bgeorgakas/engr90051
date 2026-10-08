@@ -208,6 +208,8 @@ header h1 {
 .scenario-status.outside { background: #e2e8f0; color: #334155; }
 .scenario-status.unavailable, .scenario-status.loading { background: #f1f5f9; color: #475569; }
 .scenario-metadata { color: #475569; font-size: 0.75rem; }
+.scenario-data-kind { padding: 5px 7px; border-radius: 4px; background: #f1f5f9; color: #475569; font-size: 0.74rem; font-weight: 600; }
+.scenario-data-kind.synthetic_demo { background: #faf5ff; color: #6b21a8; }
 .scenario-description { font-size: 0.8rem; }
 .scenario-actions, .address-selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .scenario-actions { margin-top: 10px; font-size: 0.8rem; }
@@ -393,8 +395,7 @@ header h1 {
 .data-state { color: #334155; }
 #data-details { margin-top: 8px; }
 #data-details summary { font-weight: 600; cursor: pointer; padding: 3px 0; }
-#data-reuse-note { font-size: 0.75rem; color: #475569; }
-#retry-official-data { margin-top: 6px; padding: 6px 10px; cursor: pointer; }
+#retry-layer-data { margin-top: 6px; padding: 6px 10px; cursor: pointer; }
 
 @media (max-width: 640px) {
   header { height: auto; min-height: 48px; flex-wrap: wrap; padding: 9px 12px; gap: 8px; }

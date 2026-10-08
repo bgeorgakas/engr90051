@@ -19,9 +19,7 @@ let searchMarker = null;
 let catchmentBounds = null;
 let catchmentPrepared = null;
 let catchmentState = "loading";
-const officialPrepared = new Map();
-const officialMetadata = new Map();
-let officialSnapshotDate = null;
+const prototypePrepared = new Map();
 
 const mapLoadWarning = document.getElementById("map-load-warning");
 const failedOptionalLayers = new Set();
@@ -77,33 +75,25 @@ const catchmentLayer = fetchOverlay("data/catchment.json", "Elizabeth Street cat
   return addOverlay(overlay);
 });
 
-// Legacy files remain available for prototype comparison only. They are NOT
-// the official model snapshots and are off by default. The filename is kept
-// so existing extraction/transform workflows are not broken.
-fetchOverlay("data/flood_extent_2100.json", "Planning boundaries (SBO/LSIO; not a 2100 model)", {
-    color: "#0284c7",
-    weight: 1,
-    fillColor: "#7dd3fc",
-    fillOpacity: 0.12,
-  }).then((overlay) => addOverlay(overlay, false));
-fetchOverlay("data/flood_extent_2010.json", "Synthetic demo (not observed 2010 flooding)", {
-    color: "#7c3aed",
-    weight: 1,
-    fillColor: "#a78bfa",
-    fillOpacity: 0.2,
-  }).then((overlay) => addOverlay(overlay, false));
+// Restore the original three prototype layers, in their original draw order.
+// Their legacy names are retained; the persistent notices explain their data types.
+const prototypeDatasets = PrototypeData.DATASETS;
+const prototypeStyles = [
+  { color: "#0284c7", weight: 1, fillColor: "#7dd3fc", fillOpacity: 0.35 },
+  { color: "#7c3aed", weight: 1, fillColor: "#a78bfa", fillOpacity: 0.4 },
+  { color: "#1e3a8a", weight: 1, fillColor: "#1d4ed8", fillOpacity: 0.45 },
+];
+prototypeDatasets.forEach((dataset, index) => {
+  map.createPane(dataset.id);
+  map.getPane(dataset.id).style.zIndex = 410 + index * 10;
+});
 
-// A separate pane makes the optional future outline readable on top of the
-// baseline. It does NOT assert that either scenario contains the other.
-map.createPane("officialFuture");
-map.getPane("officialFuture").style.zIndex = 450;
-
-const officialStatus = document.getElementById("official-status");
-const retryOfficialData = document.getElementById("retry-official-data");
+const layerStatus = document.getElementById("layer-status");
+const retryLayerData = document.getElementById("retry-layer-data");
 const datasetSources = document.getElementById("dataset-sources");
-const officialLayers = new Map();
-const officialStates = new Map();
-let loadingOfficialData = false;
+const prototypeLayers = new Map();
+const prototypeStates = new Map();
+let loadingPrototypeData = false;
 
 function sourceLink(label, href) {
   const a = document.createElement("a");
@@ -114,104 +104,96 @@ function sourceLink(label, href) {
   return a;
 }
 
-function updateOfficialStatus() {
-  const names = { baseline: "Baseline (blue fill)", future_2100: "2100 scenario (orange outline)" };
-  officialStatus.replaceChildren();
-  for (const [id, name] of Object.entries(names)) {
+function updateLayerStatus() {
+  layerStatus.replaceChildren();
+  for (const { id, label } of prototypeDatasets) {
     const line = document.createElement("p");
-    const state = officialStates.get(id) || "loading";
-    const layer = officialLayers.get(id);
-    line.textContent = `${name}: ${state === "loaded" ? (map.hasLayer(layer) ? "loaded · shown" : "loaded · hidden") : state === "failed" ? "failed to load — not evidence of no flooding" : "loading…"}`;
+    const state = prototypeStates.get(id) || "loading";
+    const layer = prototypeLayers.get(id);
+    line.textContent = `${label}: ${state === "loaded" ? (map.hasLayer(layer) ? "loaded · shown" : "loaded · hidden") : state === "failed" ? "failed to load — not evidence of no flooding" : "loading…"}`;
     line.className = state === "failed" ? "data-error" : "data-state";
-    officialStatus.appendChild(line);
+    layerStatus.appendChild(line);
   }
   addressPanel?.refresh();
 }
 
-function renderSources(manifest) {
+function renderSources() {
   datasetSources.replaceChildren();
-  manifest.datasets.forEach((dataset) => {
+  prototypeDatasets.forEach((dataset) => {
     const section = document.createElement("section");
     const heading = document.createElement("h3");
     heading.textContent = dataset.label;
     section.appendChild(heading);
     const text = document.createElement("p");
-    text.textContent = `${manifest.publisher}. Study date: ${dataset.study_date}. Scenario: ${dataset.modelling_scenario}. Recorded upstream limit: ${dataset.upstream_limits.join(", ") || "not provided"}.`;
+    text.textContent = dataset.description;
     section.appendChild(text);
-    section.appendChild(sourceLink("Official source", dataset.source_url));
+    section.appendChild(sourceLink("Layer data", dataset.file));
     section.appendChild(document.createTextNode(" · "));
-    section.appendChild(sourceLink("Source records", dataset.records_url));
+    section.appendChild(sourceLink("How this layer was made", dataset.source_url));
     datasetSources.appendChild(section);
   });
-  const snapshot = document.createElement("p");
-  snapshot.textContent = `Local snapshot retrieved ${manifest.retrieved_at_utc.slice(0, 10)} (UTC). Not automatically updated.`;
-  datasetSources.appendChild(snapshot);
 }
 
-function featureDetails(feature, dataset) {
+function featureDetails(dataset) {
   const container = document.createElement("div");
   const heading = document.createElement("strong");
   heading.textContent = dataset.label;
   container.appendChild(heading);
   const p = document.createElement("p");
-  p.textContent = `Modelled extent · study ${dataset.study_date} · record ${feature.properties.OBJECTID}. Not a live warning or an address risk rating.`;
+  p.textContent = dataset.description;
   container.appendChild(p);
-  container.appendChild(sourceLink("Melbourne Water source record", dataset.records_url));
+  container.appendChild(sourceLink("How this layer was made", dataset.source_url));
   return container;
 }
 
-async function loadOfficialData() {
-  if (loadingOfficialData) return;
-  loadingOfficialData = true;
-  retryOfficialData.hidden = true;
-  for (const id of ["baseline", "future_2100"]) {
-    if (!officialLayers.has(id)) officialStates.set(id, "loading");
-  }
-  updateOfficialStatus();
-  try {
-    const manifest = FloodData.validateManifest(await FloodData.fetchJSON("data/official/manifest.json"));
-    officialSnapshotDate = manifest.retrieved_at_utc;
-    manifest.datasets.forEach((dataset) => officialMetadata.set(dataset.id, dataset));
-    renderSources(manifest);
-    await Promise.all(manifest.datasets.map(async (dataset) => {
-      if (officialLayers.has(dataset.id)) return;
-      try {
-        const geojson = FloodData.validateExtent(await FloodData.fetchJSON(dataset.file), dataset);
-        const prepared = AddressLookup.prepareCollection(geojson);
-        const isBaseline = dataset.id === "baseline";
-        const layer = L.geoJSON(geojson, {
-          pane: isBaseline ? "overlayPane" : "officialFuture",
-          style: isBaseline
-            ? { color: "#1e40af", weight: 1.5, fillColor: "#2563eb", fillOpacity: 0.32 }
-            : { color: "#b45309", weight: 2.5, dashArray: "7 4", fill: false },
-          onEachFeature: (feature, featureLayer) => featureLayer.bindPopup(featureDetails(feature, dataset)),
-        });
-        officialLayers.set(dataset.id, layer);
-        officialPrepared.set(dataset.id, prepared);
-        officialStates.set(dataset.id, "loaded");
-        layerControl.addOverlay(layer, dataset.label);
-        if (isBaseline) layer.addTo(map);
-      } catch (err) {
-        console.error(`Official layer ${dataset.id} failed`, err);
-        officialStates.set(dataset.id, "failed");
-      }
-      updateOfficialStatus();
-    }));
-  } catch (err) {
-    console.error("Official source manifest failed", err);
-    for (const id of ["baseline", "future_2100"]) {
-      if (!officialLayers.has(id)) officialStates.set(id, "failed");
-    }
-    updateOfficialStatus();
-  } finally {
-    loadingOfficialData = false;
-    retryOfficialData.hidden = ![...officialStates.values()].includes("failed");
+function syncPrototypeControls() {
+  for (const layer of prototypeLayers.values()) layerControl.removeLayer(layer);
+  for (const dataset of prototypeDatasets) {
+    const layer = prototypeLayers.get(dataset.id);
+    if (layer) layerControl.addOverlay(layer, dataset.label);
   }
 }
 
-map.on("overlayadd overlayremove", updateOfficialStatus);
-retryOfficialData.addEventListener("click", loadOfficialData);
-loadOfficialData();
+async function loadPrototypeData() {
+  if (loadingPrototypeData) return;
+  loadingPrototypeData = true;
+  retryLayerData.hidden = true;
+  for (const { id } of prototypeDatasets) {
+    if (!prototypeLayers.has(id)) prototypeStates.set(id, "loading");
+  }
+  updateLayerStatus();
+  try {
+    await Promise.all(prototypeDatasets.map(async (dataset, index) => {
+      if (prototypeLayers.has(dataset.id)) return;
+      try {
+        const geojson = PrototypeData.validateExtent(await FloodData.fetchJSON(dataset.file), dataset);
+        const prepared = AddressLookup.prepareCollection(geojson);
+        const layer = L.geoJSON(geojson, {
+          pane: dataset.id,
+          style: prototypeStyles[index],
+          onEachFeature: (_feature, featureLayer) => featureLayer.bindPopup(featureDetails(dataset)),
+        });
+        prototypeLayers.set(dataset.id, layer);
+        prototypePrepared.set(dataset.id, prepared);
+        prototypeStates.set(dataset.id, "loaded");
+        syncPrototypeControls();
+        layer.addTo(map);
+      } catch (err) {
+        console.error(`Prototype layer ${dataset.id} failed`, err);
+        prototypeStates.set(dataset.id, "failed");
+      }
+      updateLayerStatus();
+    }));
+  } finally {
+    loadingPrototypeData = false;
+    retryLayerData.hidden = ![...prototypeStates.values()].includes("failed");
+  }
+}
+
+renderSources();
+map.on("overlayadd overlayremove", updateLayerStatus);
+retryLayerData.addEventListener("click", loadPrototypeData);
+loadPrototypeData();
 
 catchmentLayer.then((layer) => {
   if (layer) {
@@ -264,14 +246,13 @@ addressPanel = AddressPanel.create({
     : undefined,
   getData: () => ({
     catchment: { state: catchmentState, prepared: catchmentPrepared },
-    datasets: ["baseline", "future_2100"].map((id) => ({
-      id,
-      state: officialStates.get(id) || "loading",
-      metadata: officialMetadata.get(id),
-      prepared: officialPrepared.get(id),
-      visible: officialLayers.has(id) && map.hasLayer(officialLayers.get(id)),
+    datasets: prototypeDatasets.map((metadata) => ({
+      id: metadata.id,
+      state: prototypeStates.get(metadata.id) || "loading",
+      metadata,
+      prepared: prototypePrepared.get(metadata.id),
+      visible: prototypeLayers.has(metadata.id) && map.hasLayer(prototypeLayers.get(metadata.id)),
     })),
-    retrievedAt: officialSnapshotDate,
   }),
   onOpen() {
     closeStoryPanel();
@@ -286,17 +267,17 @@ addressPanel = AddressPanel.create({
     selectedLocation = result;
     if (searchMarker) map.removeLayer(searchMarker);
     const popup = document.createElement("div");
-    popup.textContent = "Selected geocoded point. See Address lookup for model matches and limitations.";
+    popup.textContent = "Selected geocoded point. See Address lookup for prototype layer matches, not a flood-risk assessment.";
     searchMarker = L.marker([result.lat, result.lon], { title: "Selected address point" }).addTo(map).bindPopup(popup);
     recenterAddress(result);
   },
   onRecenter: recenterAddress,
   onShowLayer(id) {
-    const layer = officialLayers.get(id);
+    const layer = prototypeLayers.get(id);
     if (layer && !map.hasLayer(layer)) layer.addTo(map);
-    updateOfficialStatus();
+    updateLayerStatus();
   },
-  onRetry: loadOfficialData,
+  onRetry: loadPrototypeData,
 });
 
 map.on("resize", () => {
