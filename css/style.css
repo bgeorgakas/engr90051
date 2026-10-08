@@ -5,12 +5,21 @@ html, body {
   font-family: system-ui, sans-serif;
 }
 
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+[hidden] { display: none !important; }
+
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   height: 48px;
+  flex-shrink: 0;
   box-sizing: border-box;
   padding: 0 1rem;
   background: #1f2937;
@@ -54,7 +63,7 @@ header h1 {
 
 #address-search-message {
   position: absolute;
-  top: 56px;
+  top: 8px;
   left: 50%;
   transform: translateX(-50%);
   background: #fff;
@@ -71,9 +80,15 @@ header h1 {
   display: block;
 }
 
+#map-layout {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
 #map {
   position: absolute;
-  top: 48px;
+  top: 0;
   bottom: 0;
   left: 0;
   right: 0;
@@ -81,11 +96,12 @@ header h1 {
 
 #story-panel {
   position: absolute;
-  top: 48px;
+  top: 0;
   bottom: 0;
   right: 0;
   width: 480px;
   max-width: 90vw;
+  box-sizing: border-box;
   background: #fff;
   box-shadow: -2px 0 12px rgba(0, 0, 0, 0.25);
   padding: 1rem;
@@ -214,4 +230,46 @@ header h1 {
 
 .marker-cluster:hover div {
   transform: scale(1.2);
+}
+
+#dataset-panel {
+  position: absolute;
+  left: 12px;
+  bottom: 28px;
+  z-index: 800;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 100px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px #0f172a26;
+  color: #1f2937;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+#dataset-panel h2 { font-size: 1rem; margin: 0 0 5px; }
+#dataset-panel h3 { font-size: 0.84rem; margin: 12px 0 4px; }
+#dataset-panel p { margin: 5px 0; }
+#dataset-panel a { color: #1d4ed8; text-decoration: underline; }
+.data-notice { font-weight: 600; }
+.data-error, #map-load-warning { color: #991b1b; }
+.data-state { color: #334155; }
+#data-details { margin-top: 8px; }
+#data-details summary { font-weight: 600; cursor: pointer; padding: 3px 0; }
+#data-reuse-note { font-size: 0.75rem; color: #475569; }
+#retry-official-data { margin-top: 6px; padding: 6px 10px; cursor: pointer; }
+
+@media (max-width: 640px) {
+  header { height: auto; min-height: 48px; flex-wrap: wrap; padding: 9px 12px; gap: 8px; }
+  header h1 { font-size: 0.9rem; white-space: normal; }
+  #address-search { width: 100%; }
+  #address-search-input { width: auto; max-width: none; flex: 1; min-width: 0; }
+  #dataset-panel { width: 300px; bottom: 32px; max-height: 43%; font-size: 0.75rem; }
+  .leaflet-control-layers { max-width: 230px; max-height: 220px; overflow: auto; font-size: 11px; }
+  #story-panel { max-width: 100%; }
 }

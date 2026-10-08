@@ -19,13 +19,31 @@
   <header>
     <h1>Elizabeth Street Catchment — Melbourne</h1>
     <form id="address-search">
-      <input id="address-search-input" type="text" placeholder="Search an address…" autocomplete="off" />
+      <input id="address-search-input" type="text" aria-label="Search an address" placeholder="Search an address…" autocomplete="off" />
       <button type="submit">Search</button>
     </form>
   </header>
-  <div id="address-search-message"></div>
+  <main id="map-layout">
+  <div id="address-search-message" role="status" aria-live="polite"></div>
 
-  <div id="map"></div>
+  <div id="map" aria-label="Elizabeth Street flood information map"></div>
+
+  <aside id="dataset-panel" aria-label="Flood data and sources">
+    <h2>Flood data</h2>
+    <p class="data-notice">Modelled scenarios, not live warnings. Outside a shaded area does not mean safe.</p>
+    <div id="official-status" role="status" aria-live="polite">Loading official model snapshots…</div>
+    <button id="retry-official-data" type="button" hidden>Retry official data</button>
+    <p id="map-load-warning" role="status" aria-live="polite" hidden></p>
+    <details id="data-details">
+      <summary>Data sources and limitations</summary>
+      <div id="dataset-sources"></div>
+      <p><strong>1% AEP</strong> means 1% annual exceedance probability, not a flood that happens only once every 100 years.</p>
+      <p>These are separate studies with different dates and recorded upstream limits. Their differences are not a like-for-like measure of climate change.</p>
+      <p>These layers do not provide water depth, a risk rating or real-time conditions. Address search only locates a place; it does not assess its flood risk.</p>
+      <p><strong>Optional prototype layers:</strong> the planning overlay is a merged SBO/LSIO boundary, not a confirmed 2100 scenario. The synthetic demo is not an observed 2010 flood extent.</p>
+      <p id="data-reuse-note">Research prototype. Public redistribution permission for the official snapshots has not been confirmed.</p>
+    </details>
+  </aside>
 
   <aside id="story-panel">
     <button id="story-panel-close" aria-label="Close">&times;</button>
@@ -38,6 +56,7 @@
     <p id="story-panel-credit"></p>
     <div id="story-panel-links"></div>
   </aside>
+  </main>
 
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -45,6 +64,7 @@
     crossorigin=""
   ></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="js/flood-data.js"></script>
   <script src="js/map.js"></script>
 </body>
 </html>
