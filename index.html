@@ -19,14 +19,48 @@
   <header>
     <h1>Elizabeth Street Catchment — Melbourne</h1>
     <form id="address-search">
-      <input id="address-search-input" type="text" aria-label="Search an address" placeholder="Search an address…" autocomplete="off" />
-      <button type="submit">Search</button>
+      <input id="address-search-input" type="text" aria-label="Search a public address or place" placeholder="Public address or place…" autocomplete="off" minlength="3" maxlength="200" required />
+      <button id="address-search-submit" type="submit">Search</button>
     </form>
   </header>
+  <p id="address-search-privacy">Search uses OpenStreetMap/Nominatim. Do not enter personal or confidential information. This limited course prototype is not a general-purpose geocoder. <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noopener noreferrer">Usage policy</a>.</p>
   <main id="map-layout">
-  <div id="address-search-message" role="status" aria-live="polite"></div>
-
   <div id="map" aria-label="Elizabeth Street flood information map"></div>
+
+  <aside id="address-panel" hidden aria-labelledby="address-panel-title" tabindex="-1">
+    <div class="address-panel-header">
+    <h2 id="address-panel-title">Address lookup</h2>
+    <button id="address-panel-close" type="button" aria-label="Close address results">&times;</button>
+    </div>
+    <p class="address-panel-notice">Modelled scenarios, not live warnings. Outside a shaded area does not mean safe.</p>
+    <p id="address-search-status" role="status" aria-live="polite"></p>
+    <div id="address-candidates" hidden>
+      <p>Choose the matching address or place, then verify its pin on the map. Similar names may refer to different locations.</p>
+      <ul id="address-candidate-list"></ul>
+    </div>
+    <section id="address-selection" hidden aria-labelledby="selected-address">
+      <h3 id="selected-address" tabindex="-1"></h3>
+      <p id="selected-coordinate"></p>
+      <p id="address-precision-note" class="address-precision-note">Approximate mapped point, not the whole property or a confirmed entrance. Verify the pin.</p>
+      <p id="address-catchment"></p>
+      <div id="address-scenarios"></div>
+      <button id="address-retry-data" type="button" hidden>Retry model data</button>
+      <details id="address-result-notes">
+        <summary>What these results mean</summary>
+        <p>These results compare one approximate point with modelled flood extents. They are not live conditions, a flood-risk rating, a water-depth estimate or an official property assessment.</p>
+        <p>Outside a modelled extent does not mean safe. Official assessment coverage has not been supplied, so an unshaded point may be beyond the study coverage. Missing or unavailable data cannot be treated as an outside result.</p>
+        <p>The scenarios come from separate studies with different dates and recorded upstream limits. Their differences are not a like-for-like measure of climate change.</p>
+        <p><strong>1% AEP</strong> means a flood of that size or larger has a 1% chance of occurring in any given year. It does not mean flooding happens only once every 100 years.</p>
+        <p>Optional prototype layers are not used for these results: the planning overlay is a merged SBO/LSIO boundary, not a confirmed 2100 scenario, and the synthetic demo is not an observed 2010 flood extent.</p>
+        <p>Research prototype. Public redistribution permission for the official snapshots has not been confirmed.</p>
+      </details>
+      <p id="address-snapshot"></p>
+      <div class="address-selection-actions">
+        <button id="address-change-location" type="button">Choose another result</button>
+        <button id="address-recentre" type="button">Show location on map</button>
+      </div>
+    </section>
+  </aside>
 
   <aside id="dataset-panel" aria-label="Flood data and sources">
     <h2>Flood data</h2>
@@ -39,7 +73,7 @@
       <div id="dataset-sources"></div>
       <p><strong>1% AEP</strong> means 1% annual exceedance probability, not a flood that happens only once every 100 years.</p>
       <p>These are separate studies with different dates and recorded upstream limits. Their differences are not a like-for-like measure of climate change.</p>
-      <p>These layers do not provide water depth, a risk rating or real-time conditions. Address search only locates a place; it does not assess its flood risk.</p>
+      <p>These layers do not provide water depth, a risk rating or real-time conditions. Address lookup checks whether a single approximate point intersects the modelled extents; it is not a property-wide flood-risk assessment.</p>
       <p><strong>Optional prototype layers:</strong> the planning overlay is a merged SBO/LSIO boundary, not a confirmed 2100 scenario. The synthetic demo is not an observed 2010 flood extent.</p>
       <p id="data-reuse-note">Research prototype. Public redistribution permission for the official snapshots has not been confirmed.</p>
     </details>
@@ -65,6 +99,9 @@
   ></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="js/flood-data.js"></script>
+  <script src="js/address-lookup.js"></script>
+  <script src="js/address-search.js"></script>
+  <script src="js/address-panel.js"></script>
   <script src="js/map.js"></script>
 </body>
 </html>

@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "endpoint": "https://nominatim.openstreetmap.org/search",
+  "minIntervalMs": 1100,
+  "timeoutMs": 12000,
+  "usage": "Low-volume course prototype: one tester at a time. The public service limit is shared by all application users; this client-only limit is not a multi-user rate limiter. Use a compliant shared proxy or another provider before wider testing.",
+  "policy_url": "https://operations.osmfoundation.org/policies/nominatim/"
+}

@@ -66,13 +66,57 @@ snapshots to a public repository. No deployment has been performed here.
 The original legacy coordinates have been preserved; their misleading metadata
 labels have been corrected. New official model files are kept separately.
 
+## Address results
+
+Search for a public address/place, then explicitly select a matching result.
+The panel checks that one approximate geocoded point against **both** official
+model snapshots, regardless of which layers are visible. It distinguishes
+inside, on a polygon boundary, outside the displayed extent, loading, and
+unavailable data. Holes and every small component are retained in the checks.
+Synthetic demonstration layers and planning overlays are never used to produce
+an address result.
+
+The catchment check describes the project's geographic scope, **not** the
+hydraulic model's assessed coverage. We do not have a model-study coverage
+boundary. No intersection therefore does not prove the address was assessed,
+does not mean safe, and is not a property-level risk rating. Geocoded points
+can represent a street/place centre rather than a building or entrance; users
+must verify the pin. This is not an engineering or emergency assessment.
+
+Results show the relevant scenario, study date, source record IDs when matched,
+snapshot date and official source link. Failed model loads can be retried; the
+selected result updates once data arrives. Editing/closing/starting another
+search cancels stale requests and clears stale pins. The panel supports keyboard
+controls, candidate selection, map recentering and a mobile bottom-sheet layout.
+
+### Address service and privacy
+
+The existing OpenStreetMap/Nominatim service is retained for this **low-volume
+course prototype**, with submit-only requests (no autocomplete), a timeout,
+at least one second between requests per client, and an in-memory result cache.
+Search strings are sent to the configured provider, not stored by this app in
+localStorage, analytics, or a backend. Do not enter personal/confidential data.
+The screen links to the [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/).
+
+**Use one tester at a time with the public endpoint.** Nominatim's maximum of
+one request per second applies to the whole application, across all users.
+The browser cooldown is not a shared multi-user limiter. Before wider user
+testing, provide a compliant shared proxy with aggregate pacing/caching or
+choose an appropriate alternative provider. No geolocation or reverse lookup
+is performed.
+
+`data/search-config.json` can disable search (`enabled: false`) or switch to
+a Nominatim-compatible endpoint without editing the browser module. Invalid,
+disabled or unavailable configuration fails closed without sending searches.
+Do not put private API credentials in this public file. Provider changes must
+also update the visible attribution/privacy notice and satisfy its terms.
+
 ## What is still not implemented
 
-Address search locates a place and explicitly says it has not calculated flood
-risk. Point-in-polygon lookup, address-specific explanation, flood depths,
-live alerts, drain reporting and user submissions are not implemented by this
-data-integration change. Data absence, missing coverage and a point outside an
-extent must remain distinguishable if address lookup is added later.
+Property-wide/building-footprint assessment, verified model-study coverage,
+flood depths, live alerts, drain reporting and user submissions remain outside
+this prototype. There is no shared geocoding backend/rate limiter or validated
+address risk grade.
 
 ## Checks
 
@@ -82,6 +126,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_fetch
 ```
 
 Manual checks: baseline on/future off at startup; toggle the future outline;
-open a polygon's source popup; expand source details; search a public place;
-open a historic story; check a narrow phone viewport. Official loading failures
+open a polygon's source popup; expand source details; search/select a public place;
+check separate scenario results; change/close a search; open a historic story;
+check a narrow phone viewport. Official loading failures
 must be visible with a retry button, not silently treated as no flood extent.

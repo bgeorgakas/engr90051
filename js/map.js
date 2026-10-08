@@ -10,7 +10,18 @@ const baseLayers = {
   "Stadia Alidade Smooth": stadiaBase,
 };
 
-const layerControl = L.control.layers(baseLayers, {}, { collapsed: false }).addTo(map);
+const layerControl = L.control.layers(baseLayers, {}, { collapsed: true }).addTo(map);
+if (map.getSize().x > 640) layerControl.expand();
+
+let addressPanel = null;
+let selectedLocation = null;
+let searchMarker = null;
+let catchmentBounds = null;
+let catchmentPrepared = null;
+let catchmentState = "loading";
+const officialPrepared = new Map();
+const officialMetadata = new Map();
+let officialSnapshotDate = null;
 
 const mapLoadWarning = document.getElementById("map-load-warning");
 const failedOptionalLayers = new Set();
@@ -29,7 +40,7 @@ function fetchOverlay(url, name, style) {
       }
       return geojson;
     })
-    .then((geojson) => ({ name, layer: L.geoJSON(geojson, { style }) }))
+    .then((geojson) => ({ name, geojson, layer: L.geoJSON(geojson, { style }) }))
     .catch((err) => {
       console.error(`Failed to load overlay "${name}" from ${url}`, err);
       reportLayerFailure(name);
@@ -49,7 +60,22 @@ const catchmentLayer = fetchOverlay("data/catchment.json", "Elizabeth Street cat
   weight: 2,
   fill: false,
   dashArray: "6 4",
-}).then(addOverlay);
+}).then((overlay) => {
+  if (!overlay) {
+    catchmentState = "failed";
+    addressPanel?.refresh();
+    return null;
+  }
+  try {
+    catchmentPrepared = AddressLookup.prepareCollection(overlay.geojson);
+    catchmentState = "loaded";
+  } catch (err) {
+    catchmentState = "failed";
+    console.error("Catchment geometry cannot be used for address lookup", err);
+  }
+  addressPanel?.refresh();
+  return addOverlay(overlay);
+});
 
 // Legacy files remain available for prototype comparison only. They are NOT
 // the official model snapshots and are off by default. The filename is kept
@@ -99,6 +125,7 @@ function updateOfficialStatus() {
     line.className = state === "failed" ? "data-error" : "data-state";
     officialStatus.appendChild(line);
   }
+  addressPanel?.refresh();
 }
 
 function renderSources(manifest) {
@@ -143,11 +170,14 @@ async function loadOfficialData() {
   updateOfficialStatus();
   try {
     const manifest = FloodData.validateManifest(await FloodData.fetchJSON("data/official/manifest.json"));
+    officialSnapshotDate = manifest.retrieved_at_utc;
+    manifest.datasets.forEach((dataset) => officialMetadata.set(dataset.id, dataset));
     renderSources(manifest);
     await Promise.all(manifest.datasets.map(async (dataset) => {
       if (officialLayers.has(dataset.id)) return;
       try {
         const geojson = FloodData.validateExtent(await FloodData.fetchJSON(dataset.file), dataset);
+        const prepared = AddressLookup.prepareCollection(geojson);
         const isBaseline = dataset.id === "baseline";
         const layer = L.geoJSON(geojson, {
           pane: isBaseline ? "overlayPane" : "officialFuture",
@@ -157,6 +187,7 @@ async function loadOfficialData() {
           onEachFeature: (feature, featureLayer) => featureLayer.bindPopup(featureDetails(feature, dataset)),
         });
         officialLayers.set(dataset.id, layer);
+        officialPrepared.set(dataset.id, prepared);
         officialStates.set(dataset.id, "loaded");
         layerControl.addOverlay(layer, dataset.label);
         if (isBaseline) layer.addTo(map);
@@ -182,69 +213,96 @@ map.on("overlayadd overlayremove", updateOfficialStatus);
 retryOfficialData.addEventListener("click", loadOfficialData);
 loadOfficialData();
 
-let catchmentBounds = null;
-
 catchmentLayer.then((layer) => {
   if (layer) {
     catchmentBounds = layer.getBounds();
-    map.fitBounds(catchmentBounds);
+    if (!selectedLocation) map.fitBounds(catchmentBounds);
   }
 });
 
-let searchMarker = null;
-const addressSearchMessage = document.getElementById("address-search-message");
+// The endpoint is server-hosted configuration, so it can be replaced/disabled
+// without changing the browser module. No geocoding occurs until submission.
+let searchClient = null;
+let searchGeneration = 0;
+const searchClientReady = FloodData.fetchJSON("data/search-config.json")
+  .then((config) => {
+    if (config.enabled !== true) return null;
+    if (typeof config.endpoint !== "string" || !config.endpoint.trim()) return null;
+    searchClient = AddressSearch.createClient({
+      endpoint: config.endpoint,
+      minIntervalMs: config.minIntervalMs,
+      timeoutMs: config.timeoutMs,
+    });
+    return searchClient;
+  })
+  .catch(() => null);
 
-function showSearchMessage(text) {
-  addressSearchMessage.textContent = text;
-  addressSearchMessage.classList.add("visible");
-}
-
-function hideSearchMessage() {
-  addressSearchMessage.classList.remove("visible");
-}
-
-document.getElementById("address-search").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const query = document.getElementById("address-search-input").value.trim();
-  if (!query) return;
-
-  hideSearchMessage();
-
-  const params = new URLSearchParams({
-    format: "json",
-    limit: "1",
-    countrycodes: "au",
-    q: query,
-  });
-  if (catchmentBounds) {
-    params.set(
-      "viewbox",
-      [
-        catchmentBounds.getWest(),
-        catchmentBounds.getNorth(),
-        catchmentBounds.getEast(),
-        catchmentBounds.getSouth(),
-      ].join(",")
-    );
+function recenterAddress(result) {
+  map.setView([result.lat, result.lon], 17, { animate: false });
+  // Keep the pin in the unobscured map area, including the mobile bottom sheet.
+  const size = map.getSize();
+  const panel = document.getElementById("address-panel");
+  if (!panel.hidden) {
+    if (size.x <= 640) map.panBy([0, panel.offsetHeight / 2], { animate: false });
+    else map.panBy([panel.offsetWidth / 2, 0], { animate: false });
   }
+}
 
-  FloodData.fetchJSON(`https://nominatim.openstreetmap.org/search?${params}`)
-    .then((results) => {
-      if (!results.length) {
-        showSearchMessage(`No results found for "${query}"`);
-        return;
-      }
+addressPanel = AddressPanel.create({
+  searchClient: {
+    cancel() { searchGeneration += 1; searchClient?.cancel(); },
+    async search(query, options) {
+      const request = ++searchGeneration;
+      const client = await searchClientReady;
+      if (request !== searchGeneration) throw Object.assign(new Error("Search cancelled"), { code: "CANCELLED" });
+      if (!client) throw Object.assign(new Error("Search unavailable"), { code: "REQUEST_FAILED" });
+      return client.search(query, options);
+    },
+  },
+  getViewbox: () => catchmentBounds
+    ? [catchmentBounds.getWest(), catchmentBounds.getNorth(), catchmentBounds.getEast(), catchmentBounds.getSouth()]
+    : undefined,
+  getData: () => ({
+    catchment: { state: catchmentState, prepared: catchmentPrepared },
+    datasets: ["baseline", "future_2100"].map((id) => ({
+      id,
+      state: officialStates.get(id) || "loading",
+      metadata: officialMetadata.get(id),
+      prepared: officialPrepared.get(id),
+      visible: officialLayers.has(id) && map.hasLayer(officialLayers.get(id)),
+    })),
+    retrievedAt: officialSnapshotDate,
+  }),
+  onOpen() {
+    closeStoryPanel();
+    if (map.getSize().x <= 640) layerControl.collapse();
+  },
+  onClear() {
+    selectedLocation = null;
+    if (searchMarker) map.removeLayer(searchMarker);
+    searchMarker = null;
+  },
+  onSelect(result) {
+    selectedLocation = result;
+    if (searchMarker) map.removeLayer(searchMarker);
+    const popup = document.createElement("div");
+    popup.textContent = "Selected geocoded point. See Address lookup for model matches and limitations.";
+    searchMarker = L.marker([result.lat, result.lon], { title: "Selected address point" }).addTo(map).bindPopup(popup);
+    recenterAddress(result);
+  },
+  onRecenter: recenterAddress,
+  onShowLayer(id) {
+    const layer = officialLayers.get(id);
+    if (layer && !map.hasLayer(layer)) layer.addTo(map);
+    updateOfficialStatus();
+  },
+  onRetry: loadOfficialData,
+});
 
-      const { lat, lon, display_name } = results[0];
-      if (searchMarker) {
-        map.removeLayer(searchMarker);
-      }
-      const result = document.createElement("div");
-      result.textContent = `${display_name}. Location only — no flood-risk assessment has been calculated.`;
-      searchMarker = L.marker([lat, lon]).addTo(map).bindPopup(result).openPopup();
-      map.setView([lat, lon], 17);
-    })
-    .catch(() => showSearchMessage("Address search failed — try again."));
+map.on("resize", () => {
+  if (map.getSize().x <= 640) layerControl.collapse();
+  else layerControl.expand();
+  if (selectedLocation) recenterAddress(selectedLocation);
 });
 
 const cameraIcon = L.divIcon({
@@ -272,6 +330,7 @@ const storyPanelCredit = document.getElementById("story-panel-credit");
 const storyPanelLinks = document.getElementById("story-panel-links");
 
 function openStoryPanel(story) {
+  addressPanel?.close();
   storyPanelImage.style.display = story.image ? "" : "none";
   if (story.image) {
     storyPanelImage.src = story.image;
